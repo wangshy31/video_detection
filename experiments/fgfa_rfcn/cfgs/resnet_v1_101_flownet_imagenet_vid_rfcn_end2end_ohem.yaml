@@ -2,7 +2,7 @@
 MXNET_VERSION: ""
 output_path: "./output/fgfa_rfcn/imagenet_vid"
 symbol: resnet_v1_101_flownet_rfcn
-gpus: '0,1,2,3'
+gpus: '4,5,6,7'
 CLASS_AGNOSTIC: true
 SCALES:
 - 600
