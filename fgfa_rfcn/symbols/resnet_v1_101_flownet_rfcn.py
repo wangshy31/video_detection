@@ -865,8 +865,6 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         num_anchors = cfg.network.NUM_ANCHORS
 
         data = mx.sym.Variable(name="data")
-        data_bef = mx.sym.Variable(name="data_bef")
-        data_aft = mx.sym.Variable(name="data_aft")
         im_info = mx.sym.Variable(name="im_info")
         gt_boxes = mx.sym.Variable(name="gt_boxes")
         rpn_label = mx.sym.Variable(name='label')
@@ -874,42 +872,20 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
 
         # pass through ResNet
-        concat_data = mx.symbol.Concat(*[data, data_bef, data_aft], dim=0)
-        conv_feat = self.get_resnet_v1(concat_data)
-
-        # pass through FlowNet
-        concat_flow_data_1 = mx.symbol.Concat(data / 255.0, data_bef / 255.0, dim=1)
-        concat_flow_data_2 = mx.symbol.Concat(data / 255.0, data_aft / 255.0, dim=1)
-        concat_flow_data = mx.symbol.Concat(concat_flow_data_1, concat_flow_data_2, dim=0)
-        flow = self.get_flownet(concat_flow_data)
-
-        flow = mx.sym.SliceChannel(flow, axis=0, num_outputs=2)
-        conv_feat = mx.sym.SliceChannel(conv_feat, axis=0, num_outputs=3)
+        conv_feat = self.get_resnet_v1(data)
 
         # warping
-        flow_grid_1 = mx.sym.GridGenerator(data=flow[0], transform_type='warp', name='flow_grid_1')
-        flow_grid_2 = mx.sym.GridGenerator(data=flow[1], transform_type='warp', name='flow_grid_2')
-        warp_conv_feat_1 = mx.sym.BilinearSampler(data=conv_feat[1], grid=flow_grid_1, name='warping_feat_1')
-        warp_conv_feat_2 = mx.sym.BilinearSampler(data=conv_feat[2], grid=flow_grid_2, name='warping_feat_2')
+        #flow_grid_1 = mx.sym.GridGenerator(data=flow[0], transform_type='warp', name='flow_grid_1')
+        #flow_grid_2 = mx.sym.GridGenerator(data=flow[1], transform_type='warp', name='flow_grid_2')
+        #warp_conv_feat_1 = mx.sym.BilinearSampler(data=conv_feat[1], grid=flow_grid_1, name='warping_feat_1')
+        #warp_conv_feat_2 = mx.sym.BilinearSampler(data=conv_feat[2], grid=flow_grid_2, name='warping_feat_2')
 
         # pass through EmbedNet
-        concat_embed_data = mx.symbol.Concat(*[conv_feat[0], warp_conv_feat_1, warp_conv_feat_2], dim=0)
-        embed_output = self.get_embednet(concat_embed_data)
-        embed_output = mx.sym.SliceChannel(embed_output, axis=0, num_outputs=3)
+        #concat_embed_data = mx.symbol.Concat(*[conv_feat[0], warp_conv_feat_1, warp_conv_feat_2], dim=0)
+        #embed_output = self.get_embednet(concat_embed_data)
+        #embed_output = mx.sym.SliceChannel(embed_output, axis=0, num_outputs=3)
 
-        unnormalize_weight1 = self.compute_weight(embed_output[1], embed_output[0])
-        unnormalize_weight2 = self.compute_weight(embed_output[2], embed_output[0])
-        unnormalize_weights = mx.symbol.Concat(unnormalize_weight1, unnormalize_weight2, dim=0)
-
-        weights = mx.symbol.softmax(data=unnormalize_weights, axis=0)
-        weights = mx.sym.SliceChannel(weights, axis=0, num_outputs=2)
-
-        # tile the channel dim of weights
-        weight1 = mx.symbol.tile(data=weights[0], reps=(1, 1024, 1, 1))
-        weight2 = mx.symbol.tile(data=weights[1], reps=(1, 1024, 1, 1))
-        select_conv_feat = weight1 * warp_conv_feat_1 + weight2 * warp_conv_feat_2
-
-        conv_feats = mx.sym.SliceChannel(select_conv_feat, axis=1, num_outputs=2)
+        conv_feats = mx.sym.SliceChannel(conv_feat, axis=1, num_outputs=2)
 
         # RPN layers
         rpn_feat = conv_feats[0]
@@ -1058,13 +1034,13 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         cur_data_copies = mx.sym.tile(cur_data, reps=(data_range, 1, 1, 1))
         flow_input = mx.symbol.Concat(cur_data_copies / 255.0, data_cache / 255.0, dim=1)
         flow = self.get_flownet(flow_input)
-        
+
         flow_grid = mx.sym.GridGenerator(data=flow, transform_type='warp', name='flow_grid')
         conv_feat = mx.sym.BilinearSampler(data=feat_cache, grid=flow_grid, name='warping_feat')  # warped result
 
         embed_output = mx.symbol.slice_axis(conv_feat, axis=1, begin=1024, end=3072)
         conv_feat = mx.symbol.slice_axis(conv_feat, axis=1, begin=0, end=1024)
-        
+
         # compute weight
         cur_embed = mx.symbol.slice_axis(embed_output, axis=0, begin=cfg.TEST.KEY_FRAME_INTERVAL, end=cfg.TEST.KEY_FRAME_INTERVAL+1)
         cur_embed = mx.sym.tile(cur_embed, reps=(data_range, 1, 1, 1))
@@ -1082,7 +1058,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
 
         #weights = mx.symbol.tile(data=weights, reps=(1, 1024, 1, 1))
         #aggregated_conv_feat = mx.sym.sum(weights * conv_feat, axis=0, keepdims=True)
-        
+
         conv_feats = mx.sym.SliceChannel(aggregated_conv_feat, axis=1, num_outputs=2)
 
         ##############################################
@@ -1158,16 +1134,6 @@ class resnet_v1_101_flownet_rfcn(Symbol):
     def init_weight(self, cfg, arg_params, aux_params):
         arg_params['feat_conv_3x3_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['feat_conv_3x3_weight'])
         arg_params['feat_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['feat_conv_3x3_bias'])
-
-        arg_params['em_conv1_weight'] = mx.random.normal(0, self.get_msra_std(self.arg_shape_dict['em_conv1_weight']),
-                                                         shape=self.arg_shape_dict['em_conv1_weight'])
-        arg_params['em_conv1_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['em_conv1_bias'])
-        arg_params['em_conv2_weight'] = mx.random.normal(0, self.get_msra_std(self.arg_shape_dict['em_conv2_weight']),
-                                                         shape=self.arg_shape_dict['em_conv2_weight'])
-        arg_params['em_conv2_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['em_conv2_bias'])
-        arg_params['em_conv3_weight'] = mx.random.normal(0, self.get_msra_std(self.arg_shape_dict['em_conv3_weight']),
-                                                         shape=self.arg_shape_dict['em_conv3_weight'])
-        arg_params['em_conv3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['em_conv3_bias'])
 
         arg_params['rpn_cls_score_weight'] = mx.random.normal(0, 0.01,
                                                               shape=self.arg_shape_dict['rpn_cls_score_weight'])

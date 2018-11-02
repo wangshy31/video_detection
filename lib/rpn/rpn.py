@@ -91,7 +91,7 @@ def get_rpn_pair_batch(roidb, cfg):
     label = {'gt_boxes': gt_boxes}
 
     return data, label
-    
+
 def get_rpn_triple_batch(roidb, cfg):
     """
     prototype for rpn batch: data, im_info, gt_boxes
@@ -99,11 +99,11 @@ def get_rpn_triple_batch(roidb, cfg):
     :return: data, label
     """
     assert len(roidb) == 1, 'Single batch only'
-    imgs, bef_imgs, aft_imgs, roidb = get_triple_image(roidb, cfg)
+    imgs, roidb = get_triple_image(roidb, cfg)
 
     im_array = imgs[0]
-    bef_im_array = bef_imgs[0]
-    aft_im_array = aft_imgs[0]
+    #bef_im_array = bef_imgs[0]
+    #aft_im_array = aft_imgs[0]
 
     im_info = np.array([roidb[0]['im_info']], dtype=np.float32)
 
@@ -117,8 +117,6 @@ def get_rpn_triple_batch(roidb, cfg):
         gt_boxes = np.empty((0, 5), dtype=np.float32)
 
     data = {'data': im_array,
-            'data_bef': bef_im_array,
-            'data_aft': aft_im_array,
             'im_info': im_info}
     label = {'gt_boxes': gt_boxes}
 
