@@ -865,9 +865,12 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         num_anchors = cfg.network.NUM_ANCHORS
 
         data = mx.sym.Variable(name="data")
+        mv = mx.sym.Variable(name="mv")
+        residual = mx.sym.Variable(name="residual")
         im_info = mx.sym.Variable(name="im_info")
         gt_boxes = mx.sym.Variable(name="gt_boxes")
         rpn_label = mx.sym.Variable(name='label')
+        nearby_label = mx.sym.Variable(name='nearby_label')
         rpn_bbox_target = mx.sym.Variable(name='bbox_target')
         rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
 
@@ -995,7 +998,9 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         bbox_loss = mx.sym.Reshape(data=bbox_loss, shape=(cfg.TRAIN.BATCH_IMAGES, -1, 4 * num_reg_classes),
                                    name='bbox_loss_reshape')
 
-        group = mx.sym.Group([rpn_cls_prob, rpn_bbox_loss, cls_prob, bbox_loss, mx.sym.BlockGrad(rcnn_label)])
+        group = mx.sym.Group([rpn_cls_prob, rpn_bbox_loss, cls_prob, bbox_loss, mx.sym.BlockGrad(rcnn_label),
+                              mx.sym.BlockGrad(mv), mx.sym.BlockGrad(residual),
+                              mx.sym.BlockGrad(nearby_label)])
         self.sym = group
         return group
 

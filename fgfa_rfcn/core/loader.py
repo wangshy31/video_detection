@@ -12,7 +12,7 @@ from mxnet.executor_manager import _split_input_slice
 
 from config.config import config
 from utils.image import tensor_vstack
-from rpn.rpn import get_rpn_testbatch, get_rpn_triple_batch, assign_anchor
+from rpn.rpn import get_rpn_testbatch, get_rpn_seg_batch, assign_anchor
 from rcnn import get_rcnn_testbatch, get_rcnn_batch
 
 class TestLoader(mx.io.DataIter):
@@ -183,10 +183,10 @@ class AnchorLoader(mx.io.DataIter):
 
         # decide data and label names
         if config.TRAIN.END2END:
-            self.data_name = ['data','im_info', 'gt_boxes']
+            self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'residual']
         else:
             self.data_name = ['data']
-        self.label_name = ['label', 'bbox_target', 'bbox_weight']
+        self.label_name = ['label', 'bbox_target', 'bbox_weight', 'nearby_label']
 
         # status variable for synchronization between get_data and get_label
         self.cur = 0
@@ -354,9 +354,12 @@ class AnchorLoader(mx.io.DataIter):
 
     def parfetch(self, iroidb):
         # get testing data for multigpu
-        data, label = get_rpn_triple_batch(iroidb, self.cfg)
+        #data, label = get_rpn_triple_batch(iroidb, self.cfg)
+        data, label = get_rpn_seg_batch(iroidb, self.cfg)
         data_shape = {k: v.shape for k, v in data.items()}
         del data_shape['im_info']
+        del data_shape['mv']
+        del data_shape['residual']
         _, feat_shape, _ = self.feat_sym.infer_shape(**data_shape)
         feat_shape = [int(i) for i in feat_shape[0]]
 

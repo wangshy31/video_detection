@@ -5,6 +5,8 @@ import random
 from PIL import Image
 from bbox.bbox_transform import clip_boxes
 
+from coviar import load
+
 
 # TODO: This two functions should be merged with individual data loader
 def get_image(roidb, config):
@@ -108,6 +110,68 @@ def get_triple_image(roidb, config):
     processed_ims = []
     #processed_bef_ims = []
     #processed_aft_ims = []
+    processed_roidb = []
+    for i in range(num_images):
+        roi_rec = roidb[i]
+        assert os.path.exists(roi_rec['image']), '%s does not exist'.format(roi_rec['image'])
+        im = cv2.imread(roi_rec['image'], cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+
+        #if roi_rec.has_key('pattern'):
+            # get two different frames from the interval [frame_id + MIN_OFFSET, frame_id + MAX_OFFSET]
+            #offsets = np.random.choice(config.TRAIN.MAX_OFFSET - config.TRAIN.MIN_OFFSET + 1, 2, replace=False) + config.TRAIN.MIN_OFFSET
+            #bef_id = min(max(roi_rec['frame_seg_id'] + offsets[0], 0), roi_rec['frame_seg_len']-1)
+            #aft_id = min(max(roi_rec['frame_seg_id'] + offsets[1], 0), roi_rec['frame_seg_len']-1)
+            #bef_image = roi_rec['pattern'] % bef_id
+            #aft_image = roi_rec['pattern'] % aft_id
+
+            #assert os.path.exists(bef_image), '%s does not exist'.format(bef_image)
+            #assert os.path.exists(aft_image), '%s does not exist'.format(aft_image)
+            #bef_im = cv2.imread(bef_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+            #aft_im = cv2.imread(aft_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        #else:
+            #bef_im = im.copy()
+            #aft_im = im.copy()
+
+        if roidb[i]['flipped']:
+            im = im[:, ::-1, :]
+            #bef_im = bef_im[:, ::-1, :]
+            #aft_im = aft_im[:, ::-1, :]
+
+        new_rec = roi_rec.copy()
+        scale_ind = random.randrange(len(config.SCALES))
+        target_size = config.SCALES[scale_ind][0]
+        max_size = config.SCALES[scale_ind][1]
+
+        im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
+        #bef_im, im_scale = resize(bef_im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
+        #aft_im, im_scale = resize(aft_im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
+        im_tensor = transform(im, config.network.PIXEL_MEANS)
+        #bef_im_tensor = transform(bef_im, config.network.PIXEL_MEANS)
+        #aft_im_tensor = transform(aft_im, config.network.PIXEL_MEANS)
+        processed_ims.append(im_tensor)
+        #processed_bef_ims.append(bef_im_tensor)
+        #processed_aft_ims.append(aft_im_tensor)
+        im_info = [im_tensor.shape[2], im_tensor.shape[3], im_scale]
+        new_rec['boxes'] = roi_rec['boxes'].copy() * im_scale
+        new_rec['im_info'] = im_info
+        processed_roidb.append(new_rec)
+    #return processed_ims, processed_bef_ims, processed_aft_ims, processed_roidb
+    return processed_ims, processed_roidb
+
+def get_seg_image(roidb, config):
+    """
+    preprocess image and return processed roidb
+    :param roidb: a list of roidb
+    :return: list of img as in mxnet format
+    roidb add new item['im_info']
+    0 --- x (width, second dim of im)
+    |
+    y (height, first dim of im)
+    """
+    num_images = len(roidb)
+    processed_ims = []
+    processed_mv = []
+    processed_residual = []
     processed_roidb = []
     for i in range(num_images):
         roi_rec = roidb[i]

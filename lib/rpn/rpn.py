@@ -13,7 +13,7 @@ label =
 import numpy as np
 import numpy.random as npr
 
-from utils.image import get_image, get_triple_image, tensor_vstack
+from utils.image import get_image, get_seg_image, tensor_vstack
 from generate_anchor import generate_anchors
 from bbox.bbox_transform import bbox_overlaps, bbox_transform
 
@@ -117,6 +117,39 @@ def get_rpn_triple_batch(roidb, cfg):
         gt_boxes = np.empty((0, 5), dtype=np.float32)
 
     data = {'data': im_array,
+            'im_info': im_info}
+    label = {'gt_boxes': gt_boxes}
+
+    return data, label
+
+
+def get_rpn_seg_batch(roidb, cfg):
+    """
+    prototype for rpn batch: data, im_info, gt_boxes
+    :param roidb: ['image', 'flipped'] + ['gt_boxes', 'boxes', 'gt_classes']
+    :return: data, label
+    """
+    assert len(roidb) == 1, 'Single batch only'
+    imgs, roidb = get_seg_image(roidb, cfg)
+
+    im_array = imgs[0]
+    #bef_im_array = bef_imgs[0]
+    #aft_im_array = aft_imgs[0]
+
+    im_info = np.array([roidb[0]['im_info']], dtype=np.float32)
+
+    # gt boxes: (x1, y1, x2, y2, cls)
+    if roidb[0]['gt_classes'].size > 0:
+        gt_inds = np.where(roidb[0]['gt_classes'] != 0)[0]
+        gt_boxes = np.empty((roidb[0]['boxes'].shape[0], 5), dtype=np.float32)
+        gt_boxes[:, 0:4] = roidb[0]['boxes'][gt_inds, :]
+        gt_boxes[:, 4] = roidb[0]['gt_classes'][gt_inds]
+    else:
+        gt_boxes = np.empty((0, 5), dtype=np.float32)
+
+    data = {'data': im_array,
+            'mv': im_array,
+            'residual': im_array,
             'im_info': im_info}
     label = {'gt_boxes': gt_boxes}
 
@@ -293,5 +326,6 @@ def assign_anchor(feat_shape, gt_boxes, im_info, cfg, feat_stride=16,
 
     label = {'label': labels,
              'bbox_target': bbox_targets,
-             'bbox_weight': bbox_weights}
+             'bbox_weight': bbox_weights,
+             'nearby_label': labels}
     return label
