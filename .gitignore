@@ -91,3 +91,5 @@ output
 model
 
 .db
+*/*/.ropeproject
+
