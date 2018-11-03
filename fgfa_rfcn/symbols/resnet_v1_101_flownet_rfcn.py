@@ -1010,15 +1010,16 @@ class resnet_v1_101_flownet_rfcn(Symbol):
 
         data = mx.sym.Variable(name="data")
         im_info = mx.sym.Variable(name="im_info")
-        data_cache = mx.sym.Variable(name="data_cache")
-        feat_cache = mx.sym.Variable(name="feat_cache")
+        feat = mx.sym.Variable(name="feat")
+        #feat_cache = mx.sym.Variable(name="feat_cache")
 
         # shared convolutional layers
         conv_feat = self.get_resnet_v1(data)
-        embed_feat = self.get_embednet(conv_feat)
-        conv_embed = mx.sym.Concat(conv_feat, embed_feat, name="conv_embed")
+        #embed_feat = self.get_embednet(conv_feat)
+        #conv_embed = mx.sym.Concat(conv_feat, embed_feat, name="conv_embed")
 
-        group = mx.sym.Group([conv_embed, im_info, data_cache, feat_cache])
+        #group = mx.sym.Group([conv_embed, im_info, data_cache, feat_cache])
+        group = mx.sym.Group([conv_feat, im_info, feat])
         self.sym = group
         return group
 
@@ -1027,44 +1028,45 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         num_classes = cfg.dataset.NUM_CLASSES
         num_reg_classes = (2 if cfg.CLASS_AGNOSTIC else num_classes)
         num_anchors = cfg.network.NUM_ANCHORS
-        data_range = cfg.TEST.KEY_FRAME_INTERVAL * 2 + 1
+        #data_range = cfg.TEST.KEY_FRAME_INTERVAL * 2 + 1
 
-        data_cur = mx.sym.Variable(name="data")                 # not used
+        data = mx.sym.Variable(name="data")                 # not used
+        feat = mx.sym.Variable(name="feat")                 # not used
         im_info = mx.sym.Variable(name="im_info")
-        data_cache = mx.sym.Variable(name="data_cache")         # data_cache contains data_range images
-        feat_cache = mx.sym.Variable(name="feat_cache")         # feat_cache contains the data_range feature maps of the images
+        #data_cache = mx.sym.Variable(name="data_cache")         # data_cache contains data_range images
+        #feat_cache = mx.sym.Variable(name="feat_cache")         # feat_cache contains the data_range feature maps of the images
 
         # make data_range copies of the center frame to pass through FlowNet
-        cur_data = mx.symbol.slice_axis(data_cache, axis=0, begin=cfg.TEST.KEY_FRAME_INTERVAL, end=cfg.TEST.KEY_FRAME_INTERVAL+1)
-        cur_data_copies = mx.sym.tile(cur_data, reps=(data_range, 1, 1, 1))
-        flow_input = mx.symbol.Concat(cur_data_copies / 255.0, data_cache / 255.0, dim=1)
-        flow = self.get_flownet(flow_input)
+        #cur_data = mx.symbol.slice_axis(data_cache, axis=0, begin=cfg.TEST.KEY_FRAME_INTERVAL, end=cfg.TEST.KEY_FRAME_INTERVAL+1)
+        #cur_data_copies = mx.sym.tile(cur_data, reps=(data_range, 1, 1, 1))
+        #flow_input = mx.symbol.Concat(cur_data_copies / 255.0, data_cache / 255.0, dim=1)
+        #flow = self.get_flownet(flow_input)
 
-        flow_grid = mx.sym.GridGenerator(data=flow, transform_type='warp', name='flow_grid')
-        conv_feat = mx.sym.BilinearSampler(data=feat_cache, grid=flow_grid, name='warping_feat')  # warped result
+        #flow_grid = mx.sym.GridGenerator(data=flow, transform_type='warp', name='flow_grid')
+        #conv_feat = mx.sym.BilinearSampler(data=feat_cache, grid=flow_grid, name='warping_feat')  # warped result
 
-        embed_output = mx.symbol.slice_axis(conv_feat, axis=1, begin=1024, end=3072)
-        conv_feat = mx.symbol.slice_axis(conv_feat, axis=1, begin=0, end=1024)
+        #embed_output = mx.symbol.slice_axis(conv_feat, axis=1, begin=1024, end=3072)
+        #conv_feat = mx.symbol.slice_axis(conv_feat, axis=1, begin=0, end=1024)
 
         # compute weight
-        cur_embed = mx.symbol.slice_axis(embed_output, axis=0, begin=cfg.TEST.KEY_FRAME_INTERVAL, end=cfg.TEST.KEY_FRAME_INTERVAL+1)
-        cur_embed = mx.sym.tile(cur_embed, reps=(data_range, 1, 1, 1))
-        unnormalize_weight = self.compute_weight(embed_output, cur_embed)
+        #cur_embed = mx.symbol.slice_axis(embed_output, axis=0, begin=cfg.TEST.KEY_FRAME_INTERVAL, end=cfg.TEST.KEY_FRAME_INTERVAL+1)
+        #cur_embed = mx.sym.tile(cur_embed, reps=(data_range, 1, 1, 1))
+        #unnormalize_weight = self.compute_weight(embed_output, cur_embed)
 
-        weights = mx.symbol.softmax(data=unnormalize_weight, axis=0)
+        #weights = mx.symbol.softmax(data=unnormalize_weight, axis=0)
 
-        weights = mx.sym.SliceChannel(weights, axis=0, num_outputs=data_range)
+        #weights = mx.sym.SliceChannel(weights, axis=0, num_outputs=data_range)
         # tile part
-        aggregated_conv_feat = 0
-        warp_list = mx.sym.SliceChannel(conv_feat, axis=0, num_outputs=data_range)
-        for i in range(data_range):
-            tiled_weight = mx.symbol.tile(data=weights[i], reps=(1, 1024, 1, 1))
-            aggregated_conv_feat += tiled_weight * warp_list[i]
+        #aggregated_conv_feat = 0
+        #warp_list = mx.sym.SliceChannel(conv_feat, axis=0, num_outputs=data_range)
+        #for i in range(data_range):
+            #tiled_weight = mx.symbol.tile(data=weights[i], reps=(1, 1024, 1, 1))
+            #aggregated_conv_feat += tiled_weight * warp_list[i]
 
         #weights = mx.symbol.tile(data=weights, reps=(1, 1024, 1, 1))
         #aggregated_conv_feat = mx.sym.sum(weights * conv_feat, axis=0, keepdims=True)
 
-        conv_feats = mx.sym.SliceChannel(aggregated_conv_feat, axis=1, num_outputs=2)
+        conv_feats = mx.sym.SliceChannel(feat, axis=1, num_outputs=2)
 
         ##############################################
         # RPN
@@ -1132,7 +1134,8 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                    name='bbox_pred_reshape')
 
         # group output
-        group = mx.sym.Group([data_cur, rois, cls_prob, bbox_pred])
+        #group = mx.sym.Group([data_cur, rois, cls_prob, bbox_pred])
+        group = mx.sym.Group([data, rois, cls_prob, bbox_pred])
         self.sym = group
         return group
 

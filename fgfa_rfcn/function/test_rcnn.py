@@ -29,8 +29,12 @@ def get_predictor(sym, sym_instance, cfg, arg_params, aux_params, test_data, ctx
     # decide maximum shape
     data_names = [k[0] for k in test_data.provide_data_single]
     label_names = None
+    feat_stride = int(cfg.network.RCNN_FEAT_STRIDE)
     max_data_shape = [[('data', (1, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
-                       ('data_cache', (19, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
+                       ('feat', (1, cfg.network.FGFA_FEAT_DIM,
+                                 max([v[0] for v in cfg.SCALES]) / feat_stride,
+                                 max([v[1] for v in cfg.SCALES]) / feat_stride))
+                       #('data_cache', (19, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
                        ]]
 
     # create predictor
