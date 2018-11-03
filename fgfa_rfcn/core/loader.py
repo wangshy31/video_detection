@@ -32,7 +32,7 @@ class TestLoader(mx.io.DataIter):
         self.index = np.arange(self.size)
 
         # decide data and label names (only for training)
-        self.data_name = ['data', 'im_info', 'data_cache', 'feat_cache']
+        self.data_name = ['data', 'im_info', 'feat']#, 'data_cache', 'feat_cache']
         self.label_name = None
 
         #
@@ -111,8 +111,9 @@ class TestLoader(mx.io.DataIter):
 
         extend_data = [{'data': data[0]['data'] ,
                         'im_info': data[0]['im_info'],
-                        'data_cache': data[0]['data'],
-                        'feat_cache': data[0]['data']}]
+                        'feat': data[0]['data']}]
+                        #'data_cache': data[0]['data'],
+                        #'feat_cache': data[0]['data']}]
         self.data = [[mx.nd.array(extend_data[i][name]) for name in self.data_name] for i in xrange(len(data))]
         self.im_info = im_info
 
@@ -127,12 +128,15 @@ class TestLoader(mx.io.DataIter):
             self.key_frame_flag = 2
 
         feat_stride = float(self.cfg.network.RCNN_FEAT_STRIDE)
-        extend_data = [{'data': data[0]['data'] ,
+        extend_data = [{'data': data[0]['data'],
                         'im_info': data[0]['im_info'],
-                        'data_cache': np.zeros((19, 3, max([v[0] for v in self.cfg.SCALES]), max([v[1] for v in self.cfg.SCALES]))),
-                        'feat_cache': np.zeros((19, self.cfg.network.FGFA_FEAT_DIM,
-                                                np.ceil(max([v[0] for v in self.cfg.SCALES]) / feat_stride).astype(np.int),
-                                                np.ceil(max([v[1] for v in self.cfg.SCALES]) / feat_stride).astype(np.int)))}]
+                        'feat': np.zeros((1, self.cfg.network.FGFA_FEAT_DIM,
+                                          np.ceil(max([v[0] for v in self.cfg.SCALES]) / feat_stride).astype(np.int),
+                                          np.ceil(max([v[1] for v in self.cfg.SCALES]) / feat_stride).astype(np.int)))}]
+                        #'data_cache': np.zeros((19, 3, max([v[0] for v in self.cfg.SCALES]), max([v[1] for v in self.cfg.SCALES]))),
+                        #'feat_cache': np.zeros((19, self.cfg.network.FGFA_FEAT_DIM,
+                                                #np.ceil(max([v[0] for v in self.cfg.SCALES]) / feat_stride).astype(np.int),
+                                                #np.ceil(max([v[1] for v in self.cfg.SCALES]) / feat_stride).astype(np.int)))}]
         self.data = [[mx.nd.array(extend_data[i][name]) for name in self.data_name] for i in xrange(len(data))]
         self.im_info = im_info
 

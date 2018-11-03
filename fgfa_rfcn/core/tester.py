@@ -126,13 +126,14 @@ def generate_proposals(predictor, test_data, imdb, cfg, vis=False, thresh=0.):
 
 def get_resnet_output(predictor, data_batch, data_names):
     output_all = predictor.predict(data_batch)
-    data_dict_all = [dict(zip(data_names, data_batch.data[i])) for i in xrange(len(data_batch.data))]
+    #data_dict_all = [dict(zip(data_names, data_batch.data[i])) for i in xrange(len(data_batch.data))]
 
-    if output_all[0].has_key('conv_embed_output'):
-        feat = output_all[0]['conv_embed_output']
+    if output_all[0].has_key('feat_conv_3x3_relu_output'):
+        feat = output_all[0]['feat_conv_3x3_relu_output']
     else:
         feat = None
-    return data_dict_all[0]['data'], feat.copy()
+    #return data_dict_all[0]['data'], feat.copy()
+    return feat.copy()
 
 
 def im_detect(predictor, data_batch, data_names, scales, cfg):
@@ -245,7 +246,7 @@ def pred_eval(gpu_id, feat_predictors, aggr_predictors, test_data, imdb, cfg, vi
     roidb_idx = -1
     roidb_offset = -1
     idx = 0
-    all_frame_interval = cfg.TEST.KEY_FRAME_INTERVAL * 2 + 1
+    #all_frame_interval = cfg.TEST.KEY_FRAME_INTERVAL * 2 + 1
 
     data_time, net_time, post_time,seq_time = 0.0, 0.0, 0.0,0.0
     t = time.time()
@@ -255,100 +256,126 @@ def pred_eval(gpu_id, feat_predictors, aggr_predictors, test_data, imdb, cfg, vi
         t1 = time.time() - t
         t = time.time()
 
+        if key_frame_flag == 0:
+            roidb_idx += 1
+            roidb_offset = -1
+        feat = get_resnet_output(feat_predictors, data_batch, data_names)
+        data_batch.data[0][-1] = feat
+        data_batch.provide_data[0][-1] = ('feat', feat.shape)
+        scales = [iim_info[0, 2] for iim_info in im_info]
+        pred_result = im_detect(aggr_predictors, data_batch, data_names, scales, cfg)
+        roidb_offset += 1
+        frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
+        t2 = time.time() - t
+        t = time.time()
+        process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis,
+                            feat, scales)
+        idx += test_data.batch_size
+        t3 = time.time() - t
+        t = time.time()
+        data_time += t1
+        net_time += t2
+        post_time += t3
+
+        if logger:
+            logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
+                                                                                     data_time / idx * test_data.batch_size,
+                                                                                     net_time / idx * test_data.batch_size,
+                                                                                     post_time / idx * test_data.batch_size))
         #################################################
         # new video                                     #
         #################################################
         # empty lists and append padding images
         # do not do prediction yet
-        if key_frame_flag == 0:
-            roidb_idx += 1
-            roidb_offset = -1
+        #if key_frame_flag == 0:
+            #roidb_idx += 1
+            #roidb_offset = -1
             # init data_lsit and feat_list for a new video
-            data_list = deque(maxlen=all_frame_interval)
-            feat_list = deque(maxlen=all_frame_interval)
-            image, feat = get_resnet_output(feat_predictors, data_batch, data_names)
+            #data_list = deque(maxlen=all_frame_interval)
+            #feat_list = deque(maxlen=all_frame_interval)
+            #image, feat = get_resnet_output(feat_predictors, data_batch, data_names)
             # append cfg.TEST.KEY_FRAME_INTERVAL+1 padding images in the front (first frame)
-            while len(data_list) < cfg.TEST.KEY_FRAME_INTERVAL+1:
-                data_list.append(image)
-                feat_list.append(feat)
+            #while len(data_list) < cfg.TEST.KEY_FRAME_INTERVAL+1:
+                #data_list.append(image)
+                #feat_list.append(feat)
 
         #################################################
         # main part of the loop                         #
         #################################################
-        elif key_frame_flag == 2:
+        #elif key_frame_flag == 2:
             # keep appending data to the lists without doing prediction until the lists contain 2 * cfg.TEST.KEY_FRAME_INTERVAL objects
-            if len(data_list) < all_frame_interval - 1:
-                image, feat = get_resnet_output(feat_predictors, data_batch, data_names)
-                data_list.append(image)
-                feat_list.append(feat)
+            #if len(data_list) < all_frame_interval - 1:
+                #image, feat = get_resnet_output(feat_predictors, data_batch, data_names)
+                #data_list.append(image)
+                #feat_list.append(feat)
 
-            else:
-                scales = [iim_info[0, 2] for iim_info in im_info]
+            #else:
+                #scales = [iim_info[0, 2] for iim_info in im_info]
 
-                image, feat = get_resnet_output(feat_predictors, data_batch, data_names)
-                data_list.append(image)
-                feat_list.append(feat)
-                prepare_data(data_list, feat_list, data_batch)
-                pred_result = im_detect(aggr_predictors, data_batch, data_names, scales, cfg)
+                #image, feat = get_resnet_output(feat_predictors, data_batch, data_names)
+                #data_list.append(image)
+                #feat_list.append(feat)
+                #prepare_data(data_list, feat_list, data_batch)
+                #pred_result = im_detect(aggr_predictors, data_batch, data_names, scales, cfg)
 
-                roidb_offset += 1
-                frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
+                #roidb_offset += 1
+                #frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
 
-                t2 = time.time() - t
-                t = time.time()
-                process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis,
-                                    data_list[cfg.TEST.KEY_FRAME_INTERVAL].asnumpy(), scales)
-                idx += test_data.batch_size
+                #t2 = time.time() - t
+                #t = time.time()
+                #process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis,
+                                    #data_list[cfg.TEST.KEY_FRAME_INTERVAL].asnumpy(), scales)
+                #idx += test_data.batch_size
 
-                t3 = time.time() - t
-                t = time.time()
-                data_time += t1
-                net_time += t2
-                post_time += t3
-                print 'testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
-                                                                                      data_time / idx * test_data.batch_size,
-                                                                                      net_time / idx * test_data.batch_size,
-                                                                                      post_time / idx * test_data.batch_size)
-                if logger:
-                    logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
-                                                                                             data_time / idx * test_data.batch_size,
-                                                                                             net_time / idx * test_data.batch_size,
-                                                                                             post_time / idx * test_data.batch_size))
+                #t3 = time.time() - t
+                #t = time.time()
+                #data_time += t1
+                #net_time += t2
+                #post_time += t3
+                #print 'testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
+                                                                                      #data_time / idx * test_data.batch_size,
+                                                                                      #net_time / idx * test_data.batch_size,
+                                                                                      #post_time / idx * test_data.batch_size)
+                #if logger:
+                    #logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
+                                                                                             #data_time / idx * test_data.batch_size,
+                                                                                             #net_time / idx * test_data.batch_size,
+                                                                                             #post_time / idx * test_data.batch_size))
         #################################################
         # end part of a video                           #
         #################################################
-        elif key_frame_flag == 1:       # last frame of a video
-            end_counter = 0
-            image, feat = get_resnet_output(feat_predictors, data_batch, data_names)
-            while end_counter < cfg.TEST.KEY_FRAME_INTERVAL + 1:
-                data_list.append(image)
-                feat_list.append(feat)
-                prepare_data(data_list, feat_list, data_batch)
-                pred_result = im_detect(aggr_predictors, data_batch, data_names, scales, cfg)
+        #elif key_frame_flag == 1:       # last frame of a video
+            #end_counter = 0
+            #image, feat = get_resnet_output(feat_predictors, data_batch, data_names)
+            #while end_counter < cfg.TEST.KEY_FRAME_INTERVAL + 1:
+                #data_list.append(image)
+                #feat_list.append(feat)
+                #prepare_data(data_list, feat_list, data_batch)
+                #pred_result = im_detect(aggr_predictors, data_batch, data_names, scales, cfg)
 
-                roidb_offset += 1
-                frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
+                #roidb_offset += 1
+                #frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
 
-                t2 = time.time() - t
-                t = time.time()
-                process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis, data_list[cfg.TEST.KEY_FRAME_INTERVAL].asnumpy(), scales)
-                idx += test_data.batch_size
-                t3 = time.time() - t
-                t = time.time()
-                data_time += t1
-                net_time += t2
-                post_time += t3
+                #t2 = time.time() - t
+                #t = time.time()
+                #process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis, data_list[cfg.TEST.KEY_FRAME_INTERVAL].asnumpy(), scales)
+                #idx += test_data.batch_size
+                #t3 = time.time() - t
+                #t = time.time()
+                #data_time += t1
+                #net_time += t2
+                #post_time += t3
 
-                print 'testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
-                                                                                   data_time / idx * test_data.batch_size,
-                                                                                   net_time / idx * test_data.batch_size,
-                                                                                   post_time / idx * test_data.batch_size)
-                if logger:
-                    logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
-                                                                                             data_time / idx * test_data.batch_size,
-                                                                                             net_time / idx * test_data.batch_size,
-                                                                                             post_time / idx * test_data.batch_size))
-                end_counter += 1
+                #print 'testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
+                                                                                   #data_time / idx * test_data.batch_size,
+                                                                                   #net_time / idx * test_data.batch_size,
+                                                                                   #post_time / idx * test_data.batch_size)
+                #if logger:
+                    #logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
+                                                                                             #data_time / idx * test_data.batch_size,
+                                                                                             #net_time / idx * test_data.batch_size,
+                                                                                             #post_time / idx * test_data.batch_size))
+                #end_counter += 1
 
     with open(det_file, 'wb') as f:
         cPickle.dump((all_boxes, frame_ids), f, protocol=cPickle.HIGHEST_PROTOCOL)
@@ -358,7 +385,7 @@ def pred_eval(gpu_id, feat_predictors, aggr_predictors, test_data, imdb, cfg, vi
 def run_dill_encode(payload):
     fun,args=dill.loads(payload)
     return fun(*args)
-    
+
 def apply_async(pool,fun,args):
     payload=dill.dumps((fun,args))
     return pool.apply_async(run_dill_encode,(payload,))
@@ -367,7 +394,7 @@ def pred_eval_multiprocess(gpu_num, key_predictors, cur_predictors, test_datas, 
 
     if cfg.TEST.SEQ_NMS==False:
         if gpu_num == 1:
-            res = [pred_eval(0, key_predictors[0], cur_predictors[0], test_datas[0], imdb, cfg, vis, thresh, logger,
+            rees = [pred_eval(0, key_predictors[0], cur_predictors[0], test_datas[0], imdb, cfg, vis, thresh, logger,
                              ignore_cache), ]
         else:
             from multiprocessing.pool import ThreadPool as Pool
