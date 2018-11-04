@@ -4,8 +4,11 @@ import cv2
 import random
 from PIL import Image
 from bbox.bbox_transform import clip_boxes
-
+import sys
+sys.path.append('/ssd/wangshiyao/workspace/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
 from coviar import load
+from visualize_flow import visualize_flow
+import scipy.misc
 
 
 # TODO: This two functions should be merged with individual data loader
@@ -158,6 +161,15 @@ def get_triple_image(roidb, config):
     #return processed_ims, processed_bef_ims, processed_aft_ims, processed_roidb
     return processed_ims, processed_roidb
 
+def parse_mv(video_addr, begin_pos, end_pos):
+    a = load(video_addr, 1, False, begin_pos, end_pos)
+    #for i in range(a.shape[0]):
+        #visualize_flow(a[i].squeeze(), 'images/mv_'+str(i)+'.jpg')
+    return
+def parse_residual(video_addr, begin_pos, end_pos):
+    a = load(video_addr, 2, False, begin_pos, end_pos)
+    #for i in range(a.shape[0]):
+        #scipy.misc.imsave('images/res_'+str(i)+'.jpg', a[i].squeeze())
 def get_seg_image(roidb, config):
     """
     preprocess image and return processed roidb
@@ -177,6 +189,12 @@ def get_seg_image(roidb, config):
         roi_rec = roidb[i]
         assert os.path.exists(roi_rec['image']), '%s does not exist'.format(roi_rec['image'])
         im = cv2.imread(roi_rec['image'], cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        video_name = roi_rec['image'].replace('/VID/', '/RawVideo/').split('/')
+        begin_pos = int(video_name[-1].split('.')[0])
+        end_pos = min(begin_pos + config.TRAIN.KEY_FRAME_INTERVAL, roi_rec['frame_seg_len']-1)
+        video_name = '/'.join(video_name[:-1]) + '.mp4'
+        mv = parse_mv(video_name, begin_pos, end_pos)
+        residual = parse_residual(video_name, begin_pos, end_pos)
 
         #if roi_rec.has_key('pattern'):
             # get two different frames from the interval [frame_id + MIN_OFFSET, frame_id + MAX_OFFSET]

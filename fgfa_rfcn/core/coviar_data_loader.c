@@ -44,7 +44,7 @@ void *strrp(char *src,char *sub,char *rp,char *p) {
 }
 
 void create_and_load_bgr(AVFrame *pFrame, AVFrame *pFrameBGR, uint8_t *buffer,
-    PyArrayObject ** arr, int cur_pos) { //, int pos_target) {
+    PyArrayObject ** arr, int cur_pos, int begin_pos) {
 
     int numBytes = avpicture_get_size(AV_PIX_FMT_BGR24, pFrame->width, pFrame->height);
     buffer = (uint8_t*) av_malloc(numBytes * sizeof(uint8_t));
@@ -73,13 +73,13 @@ void create_and_load_bgr(AVFrame *pFrame, AVFrame *pFrameBGR, uint8_t *buffer,
     uint8_t *src  = (uint8_t*) pFrameBGR->data[0];
     uint8_t *dest = (uint8_t*) (*arr)->data;
 
-    int array_idx;
-    /*if (cur_pos == pos_target) {*/
-    array_idx = 1;
-    /*} else {*/
-        /*array_idx = 0;*/
-    /*}*/
-    memcpy(dest + array_idx * stride_0, src, height * linesize * sizeof(uint8_t));
+    if (cur_pos == begin_pos) {
+        memcpy(dest, src, height * linesize * sizeof(uint8_t));
+        memcpy(dest + stride_0, src, height * linesize * sizeof(uint8_t));
+    }else {
+        memcpy(dest, dest + stride_0, height * linesize * sizeof(uint8_t));
+        memcpy(dest + stride_0, src, height * linesize * sizeof(uint8_t));
+    }
     av_free(buffer);
 }
 
@@ -89,14 +89,14 @@ void create_and_load_mv_residual(
     PyArrayObject * bgr_arr,
     PyArrayObject * mv_arr,
     PyArrayObject * res_arr,
+    int begin_pos,
     int cur_pos,
     int accumulate,
     int representation,
     int *accu_src,
     int *accu_src_old,
     int width,
-    int height,
-    char *save_addr) {
+    int height) {
 
     int p_dst_x, p_dst_y, p_src_x, p_src_y, val_x, val_y;
     const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
@@ -130,8 +130,10 @@ void create_and_load_mv_residual(
                                  = accu_src_old[p_src_x * height * 2 + p_src_y * 2 + c];
                             }
                         } else {
-                            *((int32_t*)PyArray_GETPTR3(mv_arr, p_dst_y, p_dst_x, 0)) = val_x;
-                            *((int32_t*)PyArray_GETPTR3(mv_arr, p_dst_y, p_dst_x, 1)) = val_y;
+                            *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos,
+                                        p_dst_y, p_dst_x, 0)) = val_x;
+                            *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos,
+                                        p_dst_y, p_dst_x, 1)) = val_y;
                         }
                     }
                 }
@@ -143,34 +145,19 @@ void create_and_load_mv_residual(
     }
     if (cur_pos > 0){
         if (accumulate) {
-            if (representation == MV) { // && cur_pos == pos_target) {
-                FILE *fp;
-                char save_mv_addr[150];
-                char cur_pos_c[10];
-                sprintf(cur_pos_c,"%06u", cur_pos);
-                strcpy(save_mv_addr, save_addr);
-                strcat(save_mv_addr, cur_pos_c);
-                strcat(save_mv_addr, ".mv");
-                fp = fopen(save_mv_addr,"wb");
-                int32_t* ptd;
-                ptd= (int32_t *) malloc(height*width*2 * sizeof(int32_t));
+            if (representation == MV) {
                 for (int x = 0; x < height; ++x) {
                     for (int y = 0; y < width; ++y) {
-                        *((int32_t*)PyArray_GETPTR3(mv_arr, x, y, 0))
+                        *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos, x, y, 0))
                          = y - accu_src[y * height * 2 + x * 2];
-                        *((int32_t*)PyArray_GETPTR3(mv_arr, x, y, 1))
+                        *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos, x, y, 1))
                          = x - accu_src[y * height * 2 + x * 2 + 1];
-                        ptd[x*width*2+y*2] = y - accu_src[y * height * 2 + x * 2];
-                        ptd[x*width*2+y*2 + 1] = x - accu_src[y * height * 2 + x * 2 + 1];
                     }
                 }
-                fwrite(ptd, sizeof(int32_t), height * width * 2 , fp);
-                free(ptd);
-                fclose(fp);
             }
         }
 
-        if (representation == RESIDUAL) { // && cur_pos == pos_target) {
+        if (representation == RESIDUAL) {
 
             uint8_t *bgr_data = (uint8_t*) bgr_arr->data;
             int32_t *res_data = (int32_t*) res_arr->data;
@@ -181,6 +168,7 @@ void create_and_load_mv_residual(
 
             int y;
 
+            int offset = (cur_pos - begin_pos)*height*width*3;
             for (y = 0; y < height; ++y) {
                 int c, x, src_x, src_y, location, location2, location_src;
                 int32_t tmp;
@@ -190,15 +178,15 @@ void create_and_load_mv_residual(
                         src_x = accu_src[tmp];
                         src_y = accu_src[tmp + 1];
                     } else {
-                        src_x = x - (*((int32_t*)PyArray_GETPTR3(mv_arr, y, x, 0)));
-                        src_y = y - (*((int32_t*)PyArray_GETPTR3(mv_arr, y, x, 1)));
+                        src_x = x - (*((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos, y, x, 0)));
+                        src_y = y - (*((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos, y, x, 1)));
                     }
                     location_src = src_y * stride_1 + src_x * stride_2;
 
                     location = y * stride_1 + x * stride_2;
                     for (c = 0; c < 3; ++c) {
                         location2 = stride_0 + location;
-                        res_data[location] =  (int32_t) bgr_data[location2]
+                        res_data[offset + location] =  (int32_t) bgr_data[location2]
                                             - (int32_t) bgr_data[location_src + c];
                         location += 1;
                     }
@@ -214,7 +202,9 @@ int decode_video(
     PyArrayObject ** mv_arr,
     PyArrayObject ** res_arr,
     int representation,
-    int accumulate) {
+    int accumulate,
+    int begin_pos,
+    int end_pos) {
 
     AVCodec *pCodec;
     AVCodecContext *pCodecCtx= NULL;
@@ -237,7 +227,6 @@ int decode_video(
     avcodec_register_all();
 
     pCodec = avcodec_find_decoder(AV_CODEC_ID_MPEG4);
-    // pCodec = avcodec_find_decoder(AV_CODEC_ID_H264);
     if (!pCodec) {
         printf("Codec not found\n");
         return -1;
@@ -247,14 +236,11 @@ int decode_video(
         printf("Could not allocate video codec context\n");
         return -1;
     }
-
     pCodecParserCtx=av_parser_init(AV_CODEC_ID_MPEG4);
-    // pCodecParserCtx=av_parser_init(AV_CODEC_ID_H264);
     if (!pCodecParserCtx){
         printf("Could not allocate video parser context\n");
         return -1;
     }
-
     AVDictionary *opts = NULL;
     av_dict_set(&opts, "flags2", "+export_mvs", 0);
     if (avcodec_open2(pCodecCtx, pCodec, &opts) < 0) {
@@ -280,28 +266,13 @@ int decode_video(
     int *accu_src = NULL;
     int *accu_src_old = NULL;
 
-    FILE *fp_frame_i;
-    fp_frame_i = fopen("frame_type_i.txt", "w");
-    if (!fp_frame_i) {
-        printf("Could not open frame i file\n");
-        return -1;
-    }
-    char save_addr[150];
-    char tmp[150];
-    memset(save_addr, 0, 150);
-    strrp(filename, ".mp4", "", save_addr);
-    strcpy(tmp, save_addr);
-    memset(save_addr, 0, 150);
-    strrp(tmp, "RawVideo", "MV", save_addr);
-    strcat(save_addr, "/");
-
     while (1) {
         cur_size = fread(in_buffer, 1, in_buffer_size, fp_in);
-        if (cur_size == 0)
+        if (cur_size == 0 || cur_pos > end_pos)
             break;
         cur_ptr=in_buffer;
 
-        while (cur_size>0){
+        while (cur_size>0 && cur_pos<=end_pos){
             int len = av_parser_parse2(
                 pCodecParserCtx, pCodecCtx,
                 &packet.data, &packet.size,
@@ -313,18 +284,6 @@ int decode_video(
             if(packet.size==0)
                 continue;
 
-            if (pCodecParserCtx->pict_type == AV_PICTURE_TYPE_I) {
-                char cur_pos_c[5];
-                sprintf(cur_pos_c,"%u\n", cur_pos);
-                char full_pos[150];
-                strcpy(full_pos, save_addr);
-                strcat(full_pos, cur_pos_c);
-                fputs(full_pos, fp_frame_i);
-                ++cur_gop;
-                /*printf("cur_pos: %d\n", cur_pos);*/
-            }
-
-            /*if (cur_gop == gop_target && cur_pos <= pos_target) {*/
             ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
             if (ret < 0) {
                 printf("Decode Error.\n");
@@ -344,21 +303,23 @@ int decode_video(
             }
 
             if (representation == MV && ! (*mv_arr)) {
-                npy_intp dims[3];
-                dims[0] = h;
-                dims[1] = w;
-                dims[2] = 2;
-                *mv_arr = PyArray_ZEROS(3, dims, NPY_INT32, 0);
+                npy_intp dims[4];
+                dims[0] = (end_pos - begin_pos + 1);
+                dims[1] = h;
+                dims[2] = w;
+                dims[3] = 2;
+                *mv_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
             }
 
             if (representation == RESIDUAL && ! (*res_arr)) {
-                npy_intp dims[3];
-                dims[0] = h;
-                dims[1] = w;
-                dims[2] = 3;
+                npy_intp dims[4];
+                dims[0] = (end_pos - begin_pos + 1);
+                dims[1] = h;
+                dims[2] = w;
+                dims[3] = 3;
 
-                *mv_arr = PyArray_ZEROS(3, dims, NPY_INT32, 0);
-                *res_arr = PyArray_ZEROS(3, dims, NPY_INT32, 0);
+                *mv_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
+                *res_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
             }
 
             if ((representation == MV ||
@@ -375,26 +336,19 @@ int decode_video(
                 }
                 memcpy(accu_src, accu_src_old, h * w * 2 * sizeof(int));
             }
+
             if (pCodecParserCtx->pict_type == AV_PICTURE_TYPE_I) {
-                if (accu_src && accu_src_old) {
-                    for (size_t x = 0; x < w; ++x) {
-                        for (size_t y = 0; y < h; ++y) {
-                            accu_src_old[x * h * 2 + y * 2    ]  = x;
-                            accu_src_old[x * h * 2 + y * 2 + 1]  = y;
-                        }
-                    }
-                    memcpy(accu_src, accu_src_old, h * w * 2 * sizeof(int));
-                }
+                ++cur_gop;
             }
 
             if (got_picture) {
 
                 if ((cur_pos == 0              && accumulate  && representation == RESIDUAL) ||
                     (!accumulate && representation == RESIDUAL)) {
-                    /*(cur_pos == pos_target - 1 && !accumulate && representation == RESIDUAL) ||*/
-                    /*cur_pos == pos_target) {*/
-                    create_and_load_bgr(
-                        pFrame, pFrameBGR, buffer, bgr_arr, cur_pos);
+                        if (cur_pos >= begin_pos){
+                            create_and_load_bgr(
+                                    pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, begin_pos);
+                        }
                 }
 
                 if (representation == MV ||
@@ -402,29 +356,26 @@ int decode_video(
                     AVFrameSideData *sd;
                     sd = av_frame_get_side_data(pFrame, AV_FRAME_DATA_MOTION_VECTORS);
                     if (sd) {
-                        /*if (accumulate || cur_pos == pos_target) {*/
-                           create_and_load_mv_residual(
-                                sd,
-                                *bgr_arr, *mv_arr, *res_arr,
-                                cur_pos,
-                                accumulate,
-                                representation,
-                                accu_src,
-                                accu_src_old,
-                                w,
-                                h,
-                                save_addr);
-                        /*}*/
+                          if (cur_pos >= begin_pos) {
+                                create_and_load_mv_residual(
+                                    sd,
+                                    *bgr_arr, *mv_arr, *res_arr,
+                                    begin_pos,
+                                    cur_pos,
+                                    accumulate,
+                                    representation,
+                                    accu_src,
+                                    accu_src_old,
+                                    w,
+                                    h);
+                          }
                     }
 
                 }
                 cur_pos ++;
-                break;
             }
-        /*}*/
-        break;
+        }
     }
-}
 
     //Flush Decoder
     packet.data = NULL;
@@ -442,7 +393,7 @@ int decode_video(
                 /*(cur_pos == pos_target - 1 && !accumulate) ||*/
                 /*cur_pos == pos_target) {*/
                 create_and_load_bgr(
-                    pFrame, pFrameBGR, buffer, bgr_arr, cur_pos);
+                    pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, begin_pos);
             }
         }
     }
@@ -585,9 +536,11 @@ static PyObject *load(PyObject *self, PyObject *args)
 
     PyObject *arg1 = NULL; // filename.
     int representation, accumulate;
+    int begin_pos, end_pos;
 
-    if (!PyArg_ParseTuple(args, "sii", &filename,
-        &representation, &accumulate)) {
+    if (!PyArg_ParseTuple(args, "siiii", &filename,
+        &representation, &accumulate,
+        &begin_pos, &end_pos)) {
         printf("input args error!!\n");
         return NULL;
     }
@@ -599,7 +552,7 @@ static PyObject *load(PyObject *self, PyObject *args)
 
     if(decode_video(&bgr_arr, &mv_arr, &res_arr,
                     representation,
-                    accumulate) < 0) {
+                    accumulate, begin_pos, end_pos) < 0) {
         printf("Decoding video failed.\n");
         Py_XDECREF(bgr_arr);
         Py_XDECREF(mv_arr);
@@ -646,23 +599,11 @@ static PyMethodDef CoviarMethods[] = {
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
-
-/*static struct PyModuleDef coviarmodule = {*/
-static struct Py_InitModule coviarmodule = {
-    PyModuleDef_HEAD_INIT,
-    "coviar",   /* name of module */
-    NULL,       /* module documentation, may be NULL */
-    -1,         /* size of per-interpreter state of the module,
-                 or -1 if the module keeps state in global variables. */
-    CoviarMethods
-};
-
-
-PyMODINIT_FUNC PyInit_coviar(void)
+PyMODINIT_FUNC initcoviar(void)
 {
     PyObject *m;
-
-    m = PyModule_Create(&coviarmodule);
+    /*m = PyModule_Create(&coviarmodule);*/
+    m = Py_InitModule("coviar", CoviarMethods);
     if (m == NULL)
         return NULL;
 
@@ -676,25 +617,3 @@ PyMODINIT_FUNC PyInit_coviar(void)
 }
 
 
-int main(int argc, char *argv[])
-{
-    av_log_set_level(AV_LOG_QUIET);
-
-    wchar_t *program = Py_DecodeLocale(argv[0], NULL);
-    if (program == NULL) {
-        fprintf(stderr, "Fatal error: cannot decode argv[0]\n");
-        exit(1);
-    }
-
-    /* Add a built-in module, before Py_Initialize */
-    PyImport_AppendInittab("coviar", PyInit_coviar);
-
-    /* Pass argv[0] to the Python interpreter */
-    Py_SetProgramName(program);
-
-    /* Initialize the Python interpreter.  Required. */
-    Py_Initialize();
-
-    PyMem_RawFree(program);
-    return 0;
-}
