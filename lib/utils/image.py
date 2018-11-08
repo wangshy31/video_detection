@@ -237,8 +237,8 @@ def load_vid_nearby_annotation(addr, cur_id, seg_len, flipped, im_info):
     return roi_rec
 
 
-def parse_mv(video_addr, begin_pos, end_pos, im_scale):
-    mv = load(video_addr, 1, False, begin_pos, end_pos)
+def parse_mv(video_addr, gop_target, pos_target, im_scale):
+    mv = load(video_addr, gop_target, pos_target, 1, False)
     shape = mv.shape
     h = math.ceil(shape[1]*im_scale) if (shape[1]*im_scale)>int((shape[1]*im_scale))+0.5 else math.floor(shape[1]*im_scale)
     w = math.ceil(shape[2]*im_scale) if (shape[2]*im_scale)>int((shape[2]*im_scale))+0.5 else math.floor(shape[2]*im_scale)
@@ -253,11 +253,11 @@ def parse_mv(video_addr, begin_pos, end_pos, im_scale):
                    interpolation=cv2.INTER_LINEAR)
         tmp_mv = tmp_mv * (h*1.0/shape[1])
         resize_mv.append(tmp_mv.transpose(2, 0, 1))
-    #for i in range(a.shape[0]):
-        #visualize_flow(a[i].squeeze(), 'images/mv_'+str(i)+'.jpg')
+    #for i in range(mv.shape[0]):
+        #visualize_flow(mv[i].squeeze(), 'images/mv_'+str(i)+'.jpg')
     return resize_mv
-def parse_residual(video_addr, begin_pos, end_pos, im_scale):
-    residual = load(video_addr, 2, False, begin_pos, end_pos)
+def parse_residual(video_addr, gop_target, pos_target, im_scale):
+    residual = load(video_addr, gop_target, pos_target, 2, False)
     shape = residual.shape
     h = math.ceil(shape[1]*im_scale) if (shape[1]*im_scale)>int((shape[1]*im_scale))+0.5 else math.floor(shape[1]*im_scale)
     w = math.ceil(shape[2]*im_scale) if (shape[2]*im_scale)>int((shape[2]*im_scale))+0.5 else math.floor(shape[2]*im_scale)
@@ -271,8 +271,8 @@ def parse_residual(video_addr, begin_pos, end_pos, im_scale):
                    fy=h*1.0/shape[1],
                    interpolation=cv2.INTER_LINEAR)
         resize_residual.append(tmp_res.transpose(2, 0, 1))
-    #for i in range(a.shape[0]):
-        #scipy.misc.imsave('images/res_'+str(i)+'.jpg', a[i].squeeze())
+    #for i in range(residual.shape[0]):
+        #scipy.misc.imsave('images/res_'+str(i)+'.jpg', residual[i].squeeze())
     return resize_residual
 
 def get_nearby_roi(addr, begin_pos, end_pos, seg_len, flipped, im_info):
@@ -297,6 +297,7 @@ def get_seg_image(roidb, config):
     processed_mv = []
     processed_residual = []
     processed_nearby_roidb = []
+    num_interval = config.TRAIN.KEY_FRAME_INTERVAL
     #processed_roidb = []
     for i in range(num_images):
         roi_rec = roidb[i]
@@ -319,21 +320,22 @@ def get_seg_image(roidb, config):
 
         video_name = roi_rec['image'].replace('/VID/', '/RawVideo/').split('/')
         begin_pos = int(video_name[-1].split('.')[0])
-        end_pos = min(begin_pos + config.TRAIN.KEY_FRAME_INTERVAL, roi_rec['frame_seg_len']-1)
+        pos_target = min(num_interval, roi_rec['frame_seg_len']-begin_pos-1)
         #read motion vectors and residuals
         video_name = '/'.join(video_name[:-1]) + '.mp4'
-        mv = parse_mv(video_name, begin_pos, end_pos, im_scale)[1:]
-        mv = np.pad(mv, ((0, config.TRAIN.KEY_FRAME_INTERVAL-(end_pos-begin_pos)), (0,0), (0,0), (0,0)), 'constant')
-        residual = parse_residual(video_name, begin_pos, end_pos, im_scale)[1:]
-        residual = np.pad(residual, ((0, config.TRAIN.KEY_FRAME_INTERVAL-(end_pos-begin_pos)), (0,0), (0,0), (0,0)), 'constant')
+        mv = parse_mv(video_name, begin_pos/(num_interval+1), pos_target, im_scale)
+        mv = np.pad(mv, ((0, num_interval-pos_target), (0,0), (0,0), (0,0)), 'constant')
+        residual = parse_residual(video_name, begin_pos/(num_interval+1), pos_target, im_scale)
+        residual = np.pad(residual, ((0, num_interval-pos_target), (0,0), (0,0), (0,0)), 'constant')
         if roidb[i]['flipped']:
             mv = mv[:, :, ::-1, :]
             residual = residual[:, :, ::-1, :]
         #read nearby roi_recs
-        nearby_roidb = get_nearby_roi(roi_rec['image'], begin_pos, end_pos,
+        nearby_roidb = get_nearby_roi(roi_rec['image'], begin_pos, begin_pos+pos_target,
                                     roi_rec['frame_seg_len'], roi_rec['flipped'], im_info)
-        for j in range(end_pos-begin_pos+1, config.TRAIN.KEY_FRAME_INTERVAL+1):
+        for j in range(pos_target, num_interval):
             nearby_roidb.append(nearby_roidb[-1])
+        #print len(nearby_roidb), mv.shape, residual.shape
         assert (len(nearby_roidb)-1) == mv.shape[0] == residual.shape[0], 'len(nearby_roidb) == mv.shape[0] == residual.shape[0]'
 
 

@@ -10,18 +10,12 @@
 #include <math.h>
 #include <stdio.h>
 #include <omp.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include <libavutil/motion_vector.h>
 #include <libavformat/avformat.h>
 #include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
-#include "opencv2/core/core.hpp"
-#include "opencv2/contrib/contrib.hpp"
-#include "opencv2/highgui/highgui.hpp"
-
 
 #define FF_INPUT_BUFFER_PADDING_SIZE 32
 #define MV 1
@@ -32,19 +26,9 @@ static const char *filename = NULL;
 
 static PyObject *CoviarError;
 
-void *strrp(char *src,char *sub,char *rp,char *p) {
-    int sub_len=strlen(sub);
-    char *po=NULL,*q=src;
-    while((po=strstr(q,sub))!=NULL) {
-        strncat(p,q,po-q);
-        strcat(p,rp);
-        q+=po-q+sub_len;
-    }
-    strcat(p,q);
-}
 
 void create_and_load_bgr(AVFrame *pFrame, AVFrame *pFrameBGR, uint8_t *buffer,
-    PyArrayObject ** arr, int cur_pos, int begin_pos) {
+    PyArrayObject ** arr, int cur_pos, int pos_target) {
 
     int numBytes = avpicture_get_size(AV_PIX_FMT_BGR24, pFrame->width, pFrame->height);
     buffer = (uint8_t*) av_malloc(numBytes * sizeof(uint8_t));
@@ -73,10 +57,11 @@ void create_and_load_bgr(AVFrame *pFrame, AVFrame *pFrameBGR, uint8_t *buffer,
     uint8_t *src  = (uint8_t*) pFrameBGR->data[0];
     uint8_t *dest = (uint8_t*) (*arr)->data;
 
-    if (cur_pos == begin_pos) {
+    int array_idx;
+    if (cur_pos == 0) {
         memcpy(dest, src, height * linesize * sizeof(uint8_t));
         memcpy(dest + stride_0, src, height * linesize * sizeof(uint8_t));
-    }else {
+    } else {
         memcpy(dest, dest + stride_0, height * linesize * sizeof(uint8_t));
         memcpy(dest + stride_0, src, height * linesize * sizeof(uint8_t));
     }
@@ -89,14 +74,14 @@ void create_and_load_mv_residual(
     PyArrayObject * bgr_arr,
     PyArrayObject * mv_arr,
     PyArrayObject * res_arr,
-    int begin_pos,
     int cur_pos,
     int accumulate,
     int representation,
     int *accu_src,
     int *accu_src_old,
     int width,
-    int height) {
+    int height,
+    int pos_target) {
 
     int p_dst_x, p_dst_y, p_src_x, p_src_y, val_x, val_y;
     const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
@@ -130,10 +115,12 @@ void create_and_load_mv_residual(
                                  = accu_src_old[p_src_x * height * 2 + p_src_y * 2 + c];
                             }
                         } else {
-                            *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos,
-                                        p_dst_y, p_dst_x, 0)) = val_x;
-                            *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos,
-                                        p_dst_y, p_dst_x, 1)) = val_y;
+                            if (cur_pos>0){
+                                *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos-1,
+                                            p_dst_y, p_dst_x, 0)) = val_x;
+                                *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos-1,
+                                            p_dst_y, p_dst_x, 1)) = val_y;
+                            }
                         }
                     }
                 }
@@ -145,18 +132,17 @@ void create_and_load_mv_residual(
     }
     if (cur_pos > 0){
         if (accumulate) {
-            if (representation == MV) {
-                for (int x = 0; x < height; ++x) {
-                    for (int y = 0; y < width; ++y) {
-                        *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos, x, y, 0))
-                         = y - accu_src[y * height * 2 + x * 2];
-                        *((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos, x, y, 1))
-                         = x - accu_src[y * height * 2 + x * 2 + 1];
+            if (representation == MV && cur_pos == pos_target) {
+                for (int x = 0; x < width; ++x) {
+                    for (int y = 0; y < height; ++y) {
+                        *((int32_t*)PyArray_GETPTR3(mv_arr, y, x, 0))
+                         = x - accu_src[x * height * 2 + y * 2];
+                        *((int32_t*)PyArray_GETPTR3(mv_arr, y, x, 1))
+                         = y - accu_src[x * height * 2 + y * 2 + 1];
                     }
                 }
             }
         }
-
         if (representation == RESIDUAL) {
 
             uint8_t *bgr_data = (uint8_t*) bgr_arr->data;
@@ -168,7 +154,7 @@ void create_and_load_mv_residual(
 
             int y;
 
-            int offset = (cur_pos - begin_pos)*height*width*3;
+            int offset = (cur_pos-1)*height*width*3;
             for (y = 0; y < height; ++y) {
                 int c, x, src_x, src_y, location, location2, location_src;
                 int32_t tmp;
@@ -178,15 +164,15 @@ void create_and_load_mv_residual(
                         src_x = accu_src[tmp];
                         src_y = accu_src[tmp + 1];
                     } else {
-                        src_x = x - (*((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos, y, x, 0)));
-                        src_y = y - (*((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos - begin_pos, y, x, 1)));
+                        src_x = x - (*((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos-1, y, x, 0)));
+                        src_y = y - (*((int32_t*)PyArray_GETPTR4(mv_arr, cur_pos-1, y, x, 1)));
                     }
                     location_src = src_y * stride_1 + src_x * stride_2;
 
                     location = y * stride_1 + x * stride_2;
                     for (c = 0; c < 3; ++c) {
                         location2 = stride_0 + location;
-                        res_data[offset + location] =  (int32_t) bgr_data[location2]
+                        res_data[offset+location] =  (int32_t) bgr_data[location2]
                                             - (int32_t) bgr_data[location_src + c];
                         location += 1;
                     }
@@ -198,13 +184,13 @@ void create_and_load_mv_residual(
 
 
 int decode_video(
+    int gop_target,
+    int pos_target,
     PyArrayObject ** bgr_arr,
     PyArrayObject ** mv_arr,
     PyArrayObject ** res_arr,
     int representation,
-    int accumulate,
-    int begin_pos,
-    int end_pos) {
+    int accumulate) {
 
     AVCodec *pCodec;
     AVCodecContext *pCodecCtx= NULL;
@@ -227,6 +213,7 @@ int decode_video(
     avcodec_register_all();
 
     pCodec = avcodec_find_decoder(AV_CODEC_ID_MPEG4);
+    // pCodec = avcodec_find_decoder(AV_CODEC_ID_H264);
     if (!pCodec) {
         printf("Codec not found\n");
         return -1;
@@ -236,11 +223,14 @@ int decode_video(
         printf("Could not allocate video codec context\n");
         return -1;
     }
+
     pCodecParserCtx=av_parser_init(AV_CODEC_ID_MPEG4);
+    // pCodecParserCtx=av_parser_init(AV_CODEC_ID_H264);
     if (!pCodecParserCtx){
         printf("Could not allocate video parser context\n");
         return -1;
     }
+
     AVDictionary *opts = NULL;
     av_dict_set(&opts, "flags2", "+export_mvs", 0);
     if (avcodec_open2(pCodecCtx, pCodec, &opts) < 0) {
@@ -267,112 +257,120 @@ int decode_video(
     int *accu_src_old = NULL;
 
     while (1) {
+        if (cur_pos > pos_target)
+            break;
         cur_size = fread(in_buffer, 1, in_buffer_size, fp_in);
-        if (cur_size == 0 || cur_pos > end_pos)
+        if (cur_size == 0)
             break;
         cur_ptr=in_buffer;
 
-        while (cur_size>0 && cur_pos<=end_pos){
+        while (cur_size>0){
+            if (cur_pos > pos_target)
+                break;
+
             int len = av_parser_parse2(
                 pCodecParserCtx, pCodecCtx,
                 &packet.data, &packet.size,
                 cur_ptr , cur_size ,
                 AV_NOPTS_VALUE, AV_NOPTS_VALUE, AV_NOPTS_VALUE);
+
             cur_ptr += len;
             cur_size -= len;
 
             if(packet.size==0)
                 continue;
 
-            ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
-            if (ret < 0) {
-                printf("Decode Error.\n");
-                return -1;
-            }
-            int h = pFrame->height;
-            int w = pFrame->width;
-
-            // Initialize arrays.
-            if (! (*bgr_arr)) {
-                npy_intp dims[4];
-                dims[0] = 2;
-                dims[1] = h;
-                dims[2] = w;
-                dims[3] = 3;
-                *bgr_arr = PyArray_ZEROS(4, dims, NPY_UINT8, 0);
-            }
-
-            if (representation == MV && ! (*mv_arr)) {
-                npy_intp dims[4];
-                dims[0] = (end_pos - begin_pos + 1);
-                dims[1] = h;
-                dims[2] = w;
-                dims[3] = 2;
-                *mv_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
-            }
-
-            if (representation == RESIDUAL && ! (*res_arr)) {
-                npy_intp dims[4];
-                dims[0] = (end_pos - begin_pos + 1);
-                dims[1] = h;
-                dims[2] = w;
-                dims[3] = 3;
-
-                *mv_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
-                *res_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
-            }
-
-            if ((representation == MV ||
-                 representation == RESIDUAL) && accumulate &&
-                !accu_src && !accu_src_old) {
-                accu_src     = (int*) malloc(w * h * 2 * sizeof(int));
-                accu_src_old = (int*) malloc(w * h * 2 * sizeof(int));
-
-                for (size_t x = 0; x < w; ++x) {
-                    for (size_t y = 0; y < h; ++y) {
-                        accu_src_old[x * h * 2 + y * 2    ]  = x;
-                        accu_src_old[x * h * 2 + y * 2 + 1]  = y;
-                    }
-                }
-                memcpy(accu_src, accu_src_old, h * w * 2 * sizeof(int));
-            }
-
             if (pCodecParserCtx->pict_type == AV_PICTURE_TYPE_I) {
                 ++cur_gop;
             }
 
-            if (got_picture) {
+            if (cur_gop == gop_target && cur_pos <= pos_target) {
 
-                if ((cur_pos == 0              && accumulate  && representation == RESIDUAL) ||
-                    (!accumulate && representation == RESIDUAL)) {
-                        if (cur_pos >= begin_pos){
-                            create_and_load_bgr(
-                                    pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, begin_pos);
-                        }
+                ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
+                if (ret < 0) {
+                    printf("Decode Error.\n");
+                    return -1;
+                }
+                int h = pFrame->height;
+                int w = pFrame->width;
+
+                // Initialize arrays.
+                if (! (*bgr_arr)) {
+                    npy_intp dims[4];
+                    dims[0] = 2;
+                    dims[1] = h;
+                    dims[2] = w;
+                    dims[3] = 3;
+                    *bgr_arr = PyArray_ZEROS(4, dims, NPY_UINT8, 0);
                 }
 
-                if (representation == MV ||
-                    representation == RESIDUAL) {
-                    AVFrameSideData *sd;
-                    sd = av_frame_get_side_data(pFrame, AV_FRAME_DATA_MOTION_VECTORS);
-                    if (sd) {
-                          if (cur_pos >= begin_pos) {
+                if (representation == MV && ! (*mv_arr)) {
+                    npy_intp dims[4];
+                    dims[0] = pos_target;
+                    dims[1] = h;
+                    dims[2] = w;
+                    dims[3] = 2;
+                    *mv_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
+                }
+
+                if (representation == RESIDUAL && ! (*res_arr)) {
+                    npy_intp dims[4];
+                    dims[0] = pos_target;
+                    dims[1] = h;
+                    dims[2] = w;
+                    dims[3] = 3;
+
+                    *mv_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
+                    *res_arr = PyArray_ZEROS(4, dims, NPY_INT32, 0);
+                }
+
+                if ((representation == MV ||
+                     representation == RESIDUAL) && accumulate &&
+                    !accu_src && !accu_src_old) {
+                    accu_src     = (int*) malloc(w * h * 2 * sizeof(int));
+                    accu_src_old = (int*) malloc(w * h * 2 * sizeof(int));
+
+                    for (size_t x = 0; x < w; ++x) {
+                        for (size_t y = 0; y < h; ++y) {
+                            accu_src_old[x * h * 2 + y * 2    ]  = x;
+                            accu_src_old[x * h * 2 + y * 2 + 1]  = y;
+                        }
+                    }
+                    memcpy(accu_src, accu_src_old, h * w * 2 * sizeof(int));
+                }
+
+                if (got_picture) {
+
+
+                    if ((cur_pos == 0 && accumulate  && representation == RESIDUAL) ||
+                        (!accumulate && representation == RESIDUAL) ||
+                        cur_pos == pos_target) {
+                        create_and_load_bgr(
+                            pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, pos_target);
+                    }
+
+                    if (representation == MV ||
+                        representation == RESIDUAL) {
+                        AVFrameSideData *sd;
+                        sd = av_frame_get_side_data(pFrame, AV_FRAME_DATA_MOTION_VECTORS);
+                        if (sd) {
+                            if (cur_pos <= pos_target) {
                                 create_and_load_mv_residual(
                                     sd,
                                     *bgr_arr, *mv_arr, *res_arr,
-                                    begin_pos,
                                     cur_pos,
                                     accumulate,
                                     representation,
                                     accu_src,
                                     accu_src_old,
                                     w,
-                                    h);
-                          }
+                                    h,
+                                    pos_target);
+                            }
+                        }
                     }
-
+                    cur_pos ++;
                 }
-                cur_pos ++;
             }
         }
     }
@@ -380,7 +378,7 @@ int decode_video(
     //Flush Decoder
     packet.data = NULL;
     packet.size = 0;
-    while(1){
+    while(0){//1){
         ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
         if (ret < 0) {
             printf("Decode Error.\n");
@@ -388,12 +386,12 @@ int decode_video(
         }
         if (!got_picture) {
             break;
-        } else { // if (cur_gop == gop_target) {
-            if ((cur_pos == 0 && accumulate) || !accumulate){
-                /*(cur_pos == pos_target - 1 && !accumulate) ||*/
-                /*cur_pos == pos_target) {*/
+        } else if (cur_gop == gop_target) {
+            if ((cur_pos == 0 && accumulate) ||
+                (cur_pos == pos_target - 1 && !accumulate) ||
+                cur_pos == pos_target) {
                 create_and_load_bgr(
-                    pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, begin_pos);
+                    pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, pos_target);
             }
         }
     }
@@ -535,25 +533,22 @@ static PyObject *load(PyObject *self, PyObject *args)
 {
 
     PyObject *arg1 = NULL; // filename.
-    int representation, accumulate;
-    int begin_pos, end_pos;
+    int gop_target, pos_target, representation, accumulate;
 
     if (!PyArg_ParseTuple(args, "siiii", &filename,
-        &representation, &accumulate,
-        &begin_pos, &end_pos)) {
-        printf("input args error!!\n");
-        return NULL;
-    }
+        &gop_target, &pos_target, &representation, &accumulate)) return NULL;
 
     PyArrayObject *bgr_arr = NULL;
     PyArrayObject *final_bgr_arr = NULL;
     PyArrayObject *mv_arr = NULL;
     PyArrayObject *res_arr = NULL;
 
-    if(decode_video(&bgr_arr, &mv_arr, &res_arr,
+    if(decode_video(gop_target, pos_target,
+                    &bgr_arr, &mv_arr, &res_arr,
                     representation,
-                    accumulate, begin_pos, end_pos) < 0) {
+                    accumulate) < 0) {
         printf("Decoding video failed.\n");
+
         Py_XDECREF(bgr_arr);
         Py_XDECREF(mv_arr);
         Py_XDECREF(res_arr);
@@ -591,7 +586,6 @@ static PyObject *load(PyObject *self, PyObject *args)
     }
 }
 
-
 static PyMethodDef CoviarMethods[] = {
     {"load",  load, METH_VARARGS, "Load a frame."},
     {"get_num_gops",  get_num_gops, METH_VARARGS, "Getting number of GOPs in a video."},
@@ -615,5 +609,6 @@ PyMODINIT_FUNC initcoviar(void)
     PyModule_AddObject(m, "error", CoviarError);
     return m;
 }
+
 
 
