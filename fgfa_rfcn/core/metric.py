@@ -36,7 +36,6 @@ class RPNAccMetric(mx.metric.EvalMetric):
     def update(self, labels, preds):
         pred = preds[self.pred.index('rpn_cls_prob')]
         label = labels[self.label.index('rpn_label')]
-
         # pred (b, c, p) or (b, c, h, w)
         pred_label = mx.ndarray.argmax_channel(pred).asnumpy().astype('int32')
         pred_label = pred_label.reshape((pred_label.shape[0], -1))

@@ -130,13 +130,16 @@ def get_rpn_seg_batch(roidb, cfg):
     :return: data, label
     """
     assert len(roidb) == 1, 'Single batch only'
-    imgs, roidb = get_seg_image(roidb, cfg)
+    imgs, mv, residual, nearby_roidb = get_seg_image(roidb, cfg)
 
     im_array = imgs[0]
+    mv_array = mv[0]
+    residual_array = residual[0]
+    rois = nearby_roidb[0]
     #bef_im_array = bef_imgs[0]
     #aft_im_array = aft_imgs[0]
 
-    im_info = np.array([roidb[0]['im_info']], dtype=np.float32)
+    im_info = np.array([rois[0]['im_info']], dtype=np.float32)
 
     # gt boxes: (x1, y1, x2, y2, cls)
     if roidb[0]['gt_classes'].size > 0:
@@ -147,12 +150,27 @@ def get_rpn_seg_batch(roidb, cfg):
     else:
         gt_boxes = np.empty((0, 5), dtype=np.float32)
 
-    data = {'data': im_array,
-            'mv': im_array,
-            'residual': im_array,
-            'im_info': im_info}
-    label = {'gt_boxes': gt_boxes}
+    nearby_gt_boxes = []
+    max_rois = max([r['gt_classes'].size for r in rois])
+    if max_rois > 0:
+        nearby_gt_boxes = [np.zeros((max_rois, 5), dtype=np.float32) for i in range(len(rois))]
+        for i in range(len(rois)):
+            if rois[i]['gt_classes'].size > 0:
+                tmp_gt_inds = np.where(rois[i]['gt_classes'] != 0)[0]
+                #tmp_gt_boxes = np.empty((rois[i]['boxes'].shape[0], 5), dtype=np.float32)
+                #tmp_gt_boxes[:len(tmp_gt_inds), 0:4] = rois[i]['boxes'][tmp_gt_inds, :]
+                #tmp_gt_boxes[:len(tmp_gt_inds), 4] = rois[i]['gt_classes'][tmp_gt_inds]
+                #print nearby_gt_boxes[i][0:len(tmp_gt_inds), 0:4], rois[i]['boxes'][tmp_gt_inds, :]
+                nearby_gt_boxes[i][0:len(tmp_gt_inds), 0:4] = rois[i]['boxes'][tmp_gt_inds, :]
+                nearby_gt_boxes[i][0:len(tmp_gt_inds), 4] = rois[i]['gt_classes'][tmp_gt_inds]
+    else:
+        nearby_gt_boxes = [np.empty((0, 5), dtype=np.float32) for i in range(len(rois))]
 
+    data = {'data': im_array,
+            'mv': mv_array,
+            'residual': residual_array,
+            'im_info': im_info}
+    label = {'gt_boxes': np.array(nearby_gt_boxes)}
     return data, label
 
 def assign_anchor(feat_shape, gt_boxes, im_info, cfg, feat_stride=16,

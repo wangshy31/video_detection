@@ -1,19 +1,21 @@
 # --------------------------------------------------------
 # Flow-Guided Feature Aggregation
-# Copyright (c) 2016 by Contributors
-# Copyright (c) 2017 Microsoft
+
 # Licensed under The Apache-2.0 License [see LICENSE for details]
 # Modified by Yuqing Zhu, Shuhao Fu, Xizhou Zhu, Yuwen Xiong
 # --------------------------------------------------------
 
 import numpy as np
 import mxnet as mx
+import cv2
 from mxnet.executor_manager import _split_input_slice
 
 from config.config import config
 from utils.image import tensor_vstack
 from rpn.rpn import get_rpn_testbatch, get_rpn_seg_batch, assign_anchor
 from rcnn import get_rcnn_testbatch, get_rcnn_batch
+import collections
+import math
 
 class TestLoader(mx.io.DataIter):
     def __init__(self, roidb, config, batch_size=1, shuffle=False,
@@ -190,7 +192,7 @@ class AnchorLoader(mx.io.DataIter):
             self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'residual']
         else:
             self.data_name = ['data']
-        self.label_name = ['label', 'bbox_target', 'bbox_weight', 'nearby_label']
+        self.label_name = ['label', 'bbox_target', 'bbox_weight']
 
         # status variable for synchronization between get_data and get_label
         self.cur = 0
@@ -265,6 +267,24 @@ class AnchorLoader(mx.io.DataIter):
             max_data_shape = []
         if max_label_shape is None:
             max_label_shape = []
+
+        if 'mv' not in max_data_shape:
+            h = max_data_shape[0][1][2]
+            w = max_data_shape[0][1][3]
+            for i in range(4):# num of pooling layers
+                h = math.floor(0.5*(h - 1)) +1
+                w = math.floor(0.5*(w - 1)) +1
+            max_data_shape.append(('mv', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 2, int(h), int(w))))
+
+        if 'residual' not in max_data_shape:
+            h = max_data_shape[0][1][2]
+            w = max_data_shape[0][1][3]
+            for i in range(4):# num of pooling layers
+                h = math.floor(0.5*(h - 1)) +1
+                w = math.floor(0.5*(w - 1)) +1
+            max_data_shape.append(('residual', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
+
+
         max_shapes = dict(max_data_shape + max_label_shape)
         input_batch_size = max_shapes['data'][0]
         im_info = [[max_shapes['data'][2], max_shapes['data'][3], 1.0]]
@@ -273,7 +293,8 @@ class AnchorLoader(mx.io.DataIter):
                               self.feat_stride, self.anchor_scales, self.anchor_ratios, self.allowed_border,
                               self.normalize_target, self.bbox_mean, self.bbox_std)
         label = [label[k] for k in self.label_name]
-        label_shape = [(k, tuple([input_batch_size] + list(v.shape[1:]))) for k, v in zip(self.label_name, label)]
+        label_shape = [(k, tuple([self.cfg.TRAIN.KEY_FRAME_INTERVAL+1] +
+                                 list(v.shape[1:]))) for k, v in zip(self.label_name, label)]
         return max_data_shape, label_shape
 
     def get_batch(self):
@@ -321,7 +342,8 @@ class AnchorLoader(mx.io.DataIter):
                                   self.feat_stride, self.anchor_scales,
                                   self.anchor_ratios, self.allowed_border,
                                   self.normalize_target, self.bbox_mean, self.bbox_std)
-            new_label_list.append(label)
+            new_label_list.append(nearby_label)
+        #print 'new_label_list!!!', new_label_list
 
         all_data = dict()
         for key in self.data_name:
@@ -360,20 +382,34 @@ class AnchorLoader(mx.io.DataIter):
         # get testing data for multigpu
         #data, label = get_rpn_triple_batch(iroidb, self.cfg)
         data, label = get_rpn_seg_batch(iroidb, self.cfg)
+
         data_shape = {k: v.shape for k, v in data.items()}
         del data_shape['im_info']
-        del data_shape['mv']
-        del data_shape['residual']
         _, feat_shape, _ = self.feat_sym.infer_shape(**data_shape)
         feat_shape = [int(i) for i in feat_shape[0]]
 
         # add gt_boxes to data for e2e
-        data['gt_boxes'] = label['gt_boxes'][np.newaxis, :, :]
+        data['gt_boxes'] = label['gt_boxes']
+
 
         # assign anchor for label
-        label = assign_anchor(feat_shape, label['gt_boxes'], data['im_info'], self.cfg,
+        #label = assign_anchor(feat_shape, label['gt_boxes'], data['im_info'], self.cfg,
+                              #self.feat_stride, self.anchor_scales,
+                              #self.anchor_ratios, self.allowed_border,
+                              #self.normalize_target, self.bbox_mean, self.bbox_std)
+
+        nearby_label = collections.defaultdict(list)
+        for i in range(label['gt_boxes'].shape[0]):
+            tmp_label = assign_anchor(feat_shape, label['gt_boxes'][i], data['im_info'], self.cfg,
                               self.feat_stride, self.anchor_scales,
                               self.anchor_ratios, self.allowed_border,
                               self.normalize_target, self.bbox_mean, self.bbox_std)
-        return {'data': data, 'label': label}
+            if i == 0:
+                for item in tmp_label.keys():
+                    nearby_label[item].append(tmp_label[item][0])
+            else:
+                for item in tmp_label.keys():
+                    nearby_label[item] = np.vstack((np.array(nearby_label[item]), np.array(tmp_label[item])))
+
+        return {'data': data, 'label': nearby_label}
 
