@@ -237,6 +237,25 @@ def load_vid_nearby_annotation(addr, cur_id, seg_len, flipped, im_info):
     return roi_rec
 
 
+def read_mv_res(prefix, im_shape, im_scale, num_interval):
+    mv_addr = prefix.replace('/VID/', '/MV/')+'.mv'
+    res_addr = prefix.replace('/VID/', '/RES/')+'.res'
+    #h = math.ceil(im_shape[0]*im_scale) if (im_shape[0]*im_scale)>int((im_shape[0]*im_scale))+0.5 else math.floor(im_shape[0]*im_scale)
+    #w = math.ceil(im_shape[1]*im_scale) if (im_shape[1]*im_scale)>int((im_shape[1]*im_scale))+0.5 else math.floor(im_shape[1]*im_scale)
+    h = im_shape[0]
+    w = im_shape[1]
+    for i in range(4):# num of pooling layers
+        h = math.floor(0.5*(h - 1)) +1
+        w = math.floor(0.5*(w - 1)) +1
+    h, w = int(h), int(w)
+    mv = np.fromfile(mv_addr, dtype=np.float16)
+    res = np.fromfile(res_addr, dtype=np.float16)
+    assert mv.shape[0]==num_interval*2*h*w, 'mv.shape[0]==num_interval*2*h*w'
+    assert res.shape[0]==num_interval*3*h*w, 'res.shape[0]==num_interval*3*h*w'
+    mv = mv.reshape((num_interval, 2, h, w))
+    res = res.reshape((num_interval, 3, h, w))
+    return mv, res
+    #mv = np.fromfile()
 def parse_mv(video_addr, gop_target, pos_target, im_scale):
     mv = load(video_addr, gop_target, pos_target, 1, False)
     shape = mv.shape
@@ -318,15 +337,18 @@ def get_seg_image(roidb, config):
         #new_rec['boxes'] = roi_rec['boxes'].copy() * im_scale
         #new_rec['im_info'] = im_info
 
-        video_name = roi_rec['image'].replace('/VID/', '/RawVideo/').split('/')
+        video_name = roi_rec['image'].split('/')
+        prefix = '/'.join(video_name[0:5])+'/'+'-'.join(video_name[5:8])+'-'+str(int(video_name[-1].split('.')[0]))
+        mv, residual = read_mv_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL)
+
         begin_pos = int(video_name[-1].split('.')[0])
         pos_target = min(num_interval, roi_rec['frame_seg_len']-begin_pos-1)
         #read motion vectors and residuals
-        video_name = '/'.join(video_name[:-1]) + '.mp4'
-        mv = parse_mv(video_name, begin_pos/(num_interval+1), pos_target, im_scale)
-        mv = np.pad(mv, ((0, num_interval-pos_target), (0,0), (0,0), (0,0)), 'constant')
-        residual = parse_residual(video_name, begin_pos/(num_interval+1), pos_target, im_scale)
-        residual = np.pad(residual, ((0, num_interval-pos_target), (0,0), (0,0), (0,0)), 'constant')
+        #video_name = '/'.join(video_name[:-1]) + '.mp4'
+        #mv = parse_mv(video_name, begin_pos/(num_interval+1), pos_target, im_scale)
+        #mv = np.pad(mv, ((0, num_interval-pos_target), (0,0), (0,0), (0,0)), 'constant')
+        #residual = parse_residual(video_name, begin_pos/(num_interval+1), pos_target, im_scale)
+        #residual = np.pad(residual, ((0, num_interval-pos_target), (0,0), (0,0), (0,0)), 'constant')
         if roidb[i]['flipped']:
             mv = mv[:, :, ::-1, :]
             residual = residual[:, :, ::-1, :]
