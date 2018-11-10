@@ -4,7 +4,7 @@ import numpy as np
 coviar_utils_module = Extension('coviar',
 		sources = ['coviar_data_loader.c'],
 		include_dirs=[np.get_include(), './ffmpeg/include/', '/usr/include/opencv2'],
-		extra_compile_args=['-DNDEBUG', '-O3'],
+		extra_compile_args=['-DNDEBUG', '-O3', '-std=c99'],
 		extra_link_args=['-lavutil', '-lavcodec', '-lavformat', '-lswscale', '-lopencv_core', '-lopencv_highgui', '-L./ffmpeg/lib/']
 )
 
