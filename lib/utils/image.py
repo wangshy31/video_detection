@@ -5,8 +5,8 @@ import random
 from PIL import Image
 from bbox.bbox_transform import clip_boxes
 import sys
-#sys.path.append('/ssd/wangshiyao/workspace/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
-sys.path.append('/home/wangshiyao/Documents/workspace/VID/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
+sys.path.append('/ssd/wangshiyao/workspace/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
+#sys.path.append('/home/wangshiyao/Documents/workspace/VID/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
 from coviar import load
 from visualize_flow import visualize_flow
 import scipy.misc

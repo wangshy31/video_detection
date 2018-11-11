@@ -741,13 +741,13 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                             use_global_stats=self.use_global_stats, eps=self.eps, fix_gamma=False)
         scale5c_branch2c = bn5c_branch2c
         res5c = mx.symbol.broadcast_add(name='res5c', *[res5b_relu, scale5c_branch2c])
-        #res5c_relu = mx.symbol.Activation(name='res5c_relu', data=res5c, act_type='relu')
+        res5c_relu = mx.symbol.Activation(name='res5c_relu', data=res5c, act_type='relu')
 
-        #feat_conv_3x3 = mx.sym.Convolution(
-            #data=res5c_relu, kernel=(3, 3), pad=(6, 6), dilate=(6, 6), num_filter=1024, name="feat_conv_3x3")
-        #feat_conv_3x3_relu = mx.sym.Activation(data=feat_conv_3x3, act_type="relu", name="feat_conv_3x3_relu")
-        #return feat_conv_3x3_relu
-        return res5c
+        feat_conv_3x3 = mx.sym.Convolution(
+            data=res5c_relu, kernel=(3, 3), pad=(6, 6), dilate=(6, 6), num_filter=1024, name="feat_conv_3x3")
+        feat_conv_3x3_relu = mx.sym.Activation(data=feat_conv_3x3, act_type="relu", name="feat_conv_3x3_relu")
+        return feat_conv_3x3_relu
+        #return res5c
 
     def get_embednet(self, data):
         em_conv1 = mx.symbol.Convolution(name='em_conv1', data=data, num_filter=512, pad=(0, 0),
@@ -1098,26 +1098,44 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         # shared convolutional layers
         conv_feat = self.get_resnet_v1(data)
 
-        residual_conv_1x1 = mx.sym.Convolution(
-            data=residual, kernel=(1, 1), pad=(0, 0), num_filter=2048, name="residual_conv_1x1")
-        mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
-        residuals = mx.sym.SliceChannel(residual_conv_1x1, axis=0, num_outputs=num_interval)
+        #residual_conv_1x1 = mx.sym.Convolution(
+            #data=residual, kernel=(1, 1), pad=(0, 0), num_filter=2048, name="residual_conv_1x1")
+        #mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
+        #residuals = mx.sym.SliceChannel(residual_conv_1x1, axis=0, num_outputs=num_interval)
 
+        #concat_feat = conv_feat
+        #seg_conv_feat = conv_feat
+        #for i in range(num_interval):
+            #flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
+            #warp_conv_feat = mx.sym.BilinearSampler(data=seg_conv_feat, grid=flow_grid)
+            #seg_conv_feat = warp_conv_feat+residuals[i]
+            #concat_feat = mx.sym.Concat(concat_feat, seg_conv_feat, dim=0)
+
+        mv_conv_3x3 = mx.sym.Convolution(
+            data=mv, kernel=(3, 3), pad=(1, 1), num_filter=2, name="mv_conv_3x3")
+        mvs = mx.sym.SliceChannel(mv_conv_3x3, axis=0, num_outputs=num_interval)
+        residuals = mx.sym.SliceChannel(residual, axis=0, num_outputs=num_interval)
         concat_feat = conv_feat
         seg_conv_feat = conv_feat
+        #seg_hidden_feat = mx.sym.zeros_like(conv_feat)
+        seg_hidden_feat = conv_feat
         for i in range(num_interval):
             flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
             warp_conv_feat = mx.sym.BilinearSampler(data=seg_conv_feat, grid=flow_grid)
-            seg_conv_feat = warp_conv_feat+residuals[i]
+            warp_hidden_feat = mx.sym.BilinearSampler(data=seg_hidden_feat, grid=flow_grid)
+            seg_conv_feat, seg_hidden_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
             concat_feat = mx.sym.Concat(concat_feat, seg_conv_feat, dim=0)
+
+        conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
+
 
         #concat_feat_bn = mx.symbol.BatchNorm(name='concat_feat_bn', data=concat_feat, use_global_stats=False,
                                        #eps=self.eps, fix_gamma=False)
-        concat_feat_relu = mx.symbol.Activation(name='concat_feat_relu', data=concat_feat, act_type='relu')
-        feat_conv_3x3 = mx.sym.Convolution(
-            data=concat_feat_relu, kernel=(3, 3), pad=(6, 6), dilate=(6, 6), num_filter=1024, name="feat_conv_3x3")
-        feat_conv_3x3_relu = mx.sym.Activation(data=feat_conv_3x3, act_type="relu", name="feat_conv_3x3_relu")
-        conv_feats = mx.sym.SliceChannel(feat_conv_3x3_relu, axis=1, num_outputs=2)
+        #concat_feat_relu = mx.symbol.Activation(name='concat_feat_relu', data=concat_feat, act_type='relu')
+        #feat_conv_3x3 = mx.sym.Convolution(
+            #data=concat_feat_relu, kernel=(3, 3), pad=(6, 6), dilate=(6, 6), num_filter=1024, name="feat_conv_3x3")
+        #feat_conv_3x3_relu = mx.sym.Activation(data=feat_conv_3x3, act_type="relu", name="feat_conv_3x3_relu")
+        #conv_feats = mx.sym.SliceChannel(feat_conv_3x3_relu, axis=1, num_outputs=2)
 
 
         # RPN layers

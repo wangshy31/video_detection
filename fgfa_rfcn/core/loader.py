@@ -88,7 +88,7 @@ class TestLoader(mx.io.DataIter):
             if self.cur_frameid >= self.cur_seg_len:
                 self.cur_roidb_index += 1
                 self.cur_frameid = 0
-                self.key_frame_flag = 1
+                #self.key_frame_flag = 1
             return self.im_info, self.key_frame_flag, self.cur_interval, mx.io.DataBatch(data=self.data, label=self.label,
                                    pad=self.getpad(), index=self.getindex(),
                                    provide_data=self.provide_data, provide_label=self.provide_label)
