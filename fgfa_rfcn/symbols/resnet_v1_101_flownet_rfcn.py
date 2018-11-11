@@ -885,10 +885,10 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         slice_gates = mx.symbol.SliceChannel(gates, num_outputs=4, name='slice_gates')
         in_gate = mx.symbol.Activation(slice_gates[0], act_type="sigmoid", name='in_gate')
         forget_gate = mx.symbol.Activation(slice_gates[1], act_type="sigmoid", name = 'forget_gate')
-        in_transform = mx.symbol.Activation(slice_gates[2], act_type="relu", name='in_transform')
+        in_transform = mx.symbol.Activation(slice_gates[2], act_type="tanh", name='in_transform')
         out_gate = mx.symbol.Activation(slice_gates[3], act_type="sigmoid", name='out_gate')
         next_c = forget_gate * states + in_gate * in_transform
-        next_h = out_gate * mx.symbol.Activation(next_c, act_type="relu")
+        next_h = out_gate * mx.symbol.Activation(next_c, act_type="tanh")
         return next_c, next_h
 
 
@@ -1036,7 +1036,10 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             seg_conv_feat, seg_hidden_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
             concat_feat = mx.sym.Concat(concat_feat, seg_conv_feat, dim=0)
 
-        conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
+
+        concat_feat_bn = mx.symbol.BatchNorm(name='concat_feat_bn', data=concat_feat, use_global_stats=True,
+                                       eps=self.eps, fix_gamma=False)
+        conv_feats = mx.sym.SliceChannel(concat_feat_bn, axis=1, num_outputs=2)
 
         # RPN layers
         rpn_feat = conv_feats[0]
@@ -1072,7 +1075,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             concat_bbox_loss = mx.symbol.Concat(concat_bbox_loss, bbox_loss, dim=0)
             concat_rcnn_label = mx.symbol.Concat(concat_rcnn_label, rcnn_label, dim=0)
 
-        group = mx.sym.Group([concat_rpn_cls_prob, concat_rpn_bbox_loss, concat_cls_prob, concat_bbox_loss, mx.sym.BlockGrad(concat_rcnn_label)])
+        group = mx.sym.Group([concat_rpn_cls_prob, concat_rpn_bbox_loss, concat_cls_prob, concat_bbox_loss, mx.sym.BlockGrad(concat_rcnn_label), mx.sym.BlockGrad(concat_feat_bn)])
         self.sym = group
         return group
 
@@ -1391,6 +1394,11 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             arg_params['mem_h2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_h2h'+str(i)+'_weight'])
             arg_params['mem_h2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_h2h'+str(i)+'_bias'])
 
+        arg_params['concat_feat_bn_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_feat_bn_gamma'])
+        arg_params['concat_feat_bn_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_feat_bn_beta'])
+        aux_params['concat_feat_bn_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_feat_bn_moving_mean'])
+        aux_params['concat_feat_bn_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_feat_bn_moving_var'])
+        #arg_params['concat_feat_bn_moving_var'] = mx.nd.ones(shape=self.arg_shape_dict['concat_feat_bn_moving_var'])
 
 
         #arg_params['residual_conv_1x1_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['residual_conv_1x1_weight'])
