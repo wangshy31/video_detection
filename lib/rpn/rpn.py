@@ -13,24 +13,26 @@ label =
 import numpy as np
 import numpy.random as npr
 
-from utils.image import get_image, get_seg_image, tensor_vstack
+from utils.image import get_test_seg_image, get_seg_image, tensor_vstack
 from generate_anchor import generate_anchors
 from bbox.bbox_transform import bbox_overlaps, bbox_transform
 
 
-def get_rpn_testbatch(roidb, cfg):
+def get_rpn_testbatch(roidb, cur_frame, end_frame, cfg):
     """
     return a dict of testbatch
     :param roidb: ['image', 'flipped']
     :return: data, label, im_info
     """
     # assert len(roidb) == 1, 'Single batch only'
-    imgs, roidb = get_image(roidb, cfg)
+    imgs, mv, residual, roidb = get_test_seg_image(roidb, cur_frame, end_frame, cfg)
     im_array = imgs
-    im_info = [np.array([roidb[i]['im_info']], dtype=np.float32) for i in range(len(roidb))]
+    im_info = [np.array([roidb[i][0]['im_info']], dtype=np.float32) for i in range(len(roidb))]
 
     data = [{'data': im_array[i],
-            'im_info': im_info[i]} for i in range(len(roidb))]
+             'mv': mv[i],
+             'residual': residual[i],
+             'im_info': im_info[i]} for i in range(len(roidb))]
     label = {}
 
     return data, label, im_info

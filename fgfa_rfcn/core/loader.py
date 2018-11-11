@@ -34,7 +34,7 @@ class TestLoader(mx.io.DataIter):
         self.index = np.arange(self.size)
 
         # decide data and label names (only for training)
-        self.data_name = ['data', 'im_info', 'feat']#, 'data_cache', 'feat_cache']
+        self.data_name = ['data', 'mv', 'residual', 'im_info']#, 'data_cache', 'feat_cache']
         self.label_name = None
 
         #
@@ -42,6 +42,8 @@ class TestLoader(mx.io.DataIter):
         self.cur_frameid = 0
         self.cur_seg_len = 0
         self.key_frame_flag = -1
+        self.cur_interval = 1
+        self.cur_index = 0
 
         # status variable for synchronization between get_data and get_label
         self.cur = 0
@@ -80,20 +82,22 @@ class TestLoader(mx.io.DataIter):
     def next(self):
         if self.iter_next():
             self.get_batch()
-            self.cur += self.batch_size
-            self.cur_frameid += 1
-            if self.cur_frameid == self.cur_seg_len:
+            self.cur += self.cur_interval
+            self.cur_frameid += self.cur_interval
+            self.cur_index += 1
+            if self.cur_frameid >= self.cur_seg_len:
                 self.cur_roidb_index += 1
                 self.cur_frameid = 0
                 self.key_frame_flag = 1
-            return self.im_info, self.key_frame_flag, mx.io.DataBatch(data=self.data, label=self.label,
+            return self.im_info, self.key_frame_flag, self.cur_interval, mx.io.DataBatch(data=self.data, label=self.label,
                                    pad=self.getpad(), index=self.getindex(),
                                    provide_data=self.provide_data, provide_label=self.provide_label)
         else:
             raise StopIteration
 
     def getindex(self):
-        return self.cur / self.batch_size
+        return self.cur_index
+        #return self.cur / self.batch_size
 
     def getpad(self):
         if self.cur + self.batch_size > self.size:
@@ -104,43 +108,41 @@ class TestLoader(mx.io.DataIter):
     def get_batch(self):
         cur_roidb = self.roidb[self.cur_roidb_index].copy()
         cur_roidb['image'] = cur_roidb['pattern'] % self.cur_frameid
+        end_frame = cur_roidb['key_frames'][self.cur_frameid]
         self.cur_seg_len = cur_roidb['frame_seg_len']
-        data, label, im_info = get_rpn_testbatch([cur_roidb], self.cfg)
+        data, label, im_info = get_rpn_testbatch([cur_roidb], self.cur_frameid, end_frame, self.cfg)
         if self.cur_frameid == 0: # new video
                 self.key_frame_flag = 0
         else:       # normal frame
             self.key_frame_flag = 2
 
         extend_data = [{'data': data[0]['data'] ,
-                        'im_info': data[0]['im_info'],
-                        'feat': data[0]['data']}]
-                        #'data_cache': data[0]['data'],
-                        #'feat_cache': data[0]['data']}]
+                        'mv': data[0]['mv'],
+                        'residual': data[0]['residual'],
+                        'im_info': data[0]['im_info']}]
         self.data = [[mx.nd.array(extend_data[i][name]) for name in self.data_name] for i in xrange(len(data))]
         self.im_info = im_info
+        self.cur_interval = end_frame-self.cur_frameid+1
 
     def get_init_batch(self):
         cur_roidb = self.roidb[self.cur_roidb_index].copy()
         cur_roidb['image'] = cur_roidb['pattern'] % self.cur_frameid
+        end_frame = cur_roidb['key_frames'][int(self.cur_frameid)]
         self.cur_seg_len = cur_roidb['frame_seg_len']
-        data, label, im_info = get_rpn_testbatch([cur_roidb], self.cfg)
+        data, label, im_info = get_rpn_testbatch([cur_roidb], self.cur_frameid, end_frame, self.cfg)
         if self.cur_frameid == 0: # new frame
                 self.key_frame_flag = 0
         else:       # normal frame
             self.key_frame_flag = 2
 
-        feat_stride = float(self.cfg.network.RCNN_FEAT_STRIDE)
         extend_data = [{'data': data[0]['data'],
+                        'mv': data[0]['mv'],
+                        'residual': data[0]['residual'],
                         'im_info': data[0]['im_info'],
-                        'feat': np.zeros((1, self.cfg.network.FGFA_FEAT_DIM,
-                                          np.ceil(max([v[0] for v in self.cfg.SCALES]) / feat_stride).astype(np.int),
-                                          np.ceil(max([v[1] for v in self.cfg.SCALES]) / feat_stride).astype(np.int)))}]
-                        #'data_cache': np.zeros((19, 3, max([v[0] for v in self.cfg.SCALES]), max([v[1] for v in self.cfg.SCALES]))),
-                        #'feat_cache': np.zeros((19, self.cfg.network.FGFA_FEAT_DIM,
-                                                #np.ceil(max([v[0] for v in self.cfg.SCALES]) / feat_stride).astype(np.int),
-                                                #np.ceil(max([v[1] for v in self.cfg.SCALES]) / feat_stride).astype(np.int)))}]
+                        'num_interval': end_frame-self.cur_frameid+1}]
         self.data = [[mx.nd.array(extend_data[i][name]) for name in self.data_name] for i in xrange(len(data))]
         self.im_info = im_info
+        self.cur_interval = end_frame-self.cur_frameid+1
 
 class AnchorLoader(mx.io.DataIter):
 

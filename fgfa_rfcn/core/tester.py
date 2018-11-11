@@ -20,6 +20,7 @@ from nms.nms import py_nms_wrapper, cpu_nms_wrapper, gpu_nms_wrapper
 from nms.seq_nms import seq_nms
 from utils.PrefetchingIter import PrefetchingIter
 from collections import deque
+import sys
 
 
 class Predictor(object):
@@ -136,31 +137,40 @@ def get_resnet_output(predictor, data_batch, data_names):
     return feat.copy()
 
 
-def im_detect(predictor, data_batch, data_names, scales, cfg):
+def im_detect(predictor, data_batch, data_names, scales, gap, cfg):
     output_all = predictor.predict(data_batch)
     data_dict_all = [dict(zip(data_names, data_batch.data[i])) for i in xrange(len(data_batch.data))]
     scores_all = []
     pred_boxes_all = []
+    res = []
     for output, data_dict, scale in zip(output_all, data_dict_all, scales):
         if cfg.TEST.HAS_RPN:
-            rois = output['rois_output'].asnumpy()[:, 1:]
+            rois = output['concat_rois_output'].asnumpy().reshape(((1+cfg.TRAIN.KEY_FRAME_INTERVAL), -1, 5))
+            rois = rois[:gap, :, 1:]
         else:
-            rois = data_dict['rois'].asnumpy().reshape((-1, 5))[:, 1:]
+            rois = data_dict['rois'].asnumpy().reshape((-1, 5))[:gap, 1:]
+
+
         im_shape = data_dict['data'].shape
 
         # save output
-        scores = output['cls_prob_reshape_output'].asnumpy()[0]
-        bbox_deltas = output['bbox_pred_reshape_output'].asnumpy()[0]
-        # post processing
-        pred_boxes = bbox_pred(rois, bbox_deltas)
-        pred_boxes = clip_boxes(pred_boxes, im_shape[-2:])
+        res = []
+        for i in range(gap):
+            roi = rois[i]
+            scores = output['concat_cls_prob_output'].asnumpy()[i]
+            bbox_deltas = output['concat_bbox_pred_output'].asnumpy()[i]
+            # post processing
+            pred_boxes = bbox_pred(roi, bbox_deltas)
+            pred_boxes = clip_boxes(pred_boxes, im_shape[-2:])
 
-        # we used scaled image & roi to train, so it is necessary to transform them back
-        pred_boxes = pred_boxes / scale
+            # we used scaled image & roi to train, so it is necessary to transform them back
+            pred_boxes = pred_boxes / scale
 
-        scores_all.append(scores)
-        pred_boxes_all.append(pred_boxes)
-    return zip(scores_all, pred_boxes_all, data_dict_all)
+            res.append(zip([scores], [pred_boxes], data_dict_all))
+            #scores_all.append(scores)
+            #pred_boxes_all.append(pred_boxes)
+    #return zip(scores_all, pred_boxes_all, data_dict_all)
+    return res
 
 
 def im_batch_detect(predictor, data_batch, data_names, scales, cfg):
@@ -202,7 +212,7 @@ def pred_eval_seqnms(gpu_id,imdb):
         res=[all_boxes, frame_ids]
         imdb.evaluate_detections_multiprocess_seqnms(res, gpu_id)
 
-def pred_eval(gpu_id, feat_predictors, aggr_predictors, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True):
+def pred_eval(gpu_id, mem_predictors, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True):
     """
     wrapper for calculating offline validation for faster data analysis
     in this example, all threshold are set by hand
@@ -223,6 +233,7 @@ def pred_eval(gpu_id, feat_predictors, aggr_predictors, test_data, imdb, cfg, vi
             all_boxes, frame_ids = cPickle.load(fid)
         return all_boxes, frame_ids
 
+    fid = open('frame_id_'+str(gpu_id)+'.txt', 'w')
 
     assert vis or not test_data.shuffle
     data_names = [k[0] for k in test_data.provide_data[0]]
@@ -252,30 +263,40 @@ def pred_eval(gpu_id, feat_predictors, aggr_predictors, test_data, imdb, cfg, vi
     t = time.time()
 
     # loop through all the test data
-    for im_info, key_frame_flag, data_batch in test_data:
+    for im_info, key_frame_flag, gap, data_batch in test_data:
         t1 = time.time() - t
         t = time.time()
 
         if key_frame_flag == 0:
             roidb_idx += 1
             roidb_offset = -1
-        feat = get_resnet_output(feat_predictors, data_batch, data_names)
-        data_batch.data[0][-1] = feat
-        data_batch.provide_data[0][-1] = ('feat', feat.shape)
+        #feat = get_resnet_output(feat_predictors, data_batch, data_names)
+        #data_batch.data[0][-1] = feat
+        #data_batch.provide_data[0][-1] = ('feat', feat.shape)
         scales = [iim_info[0, 2] for iim_info in im_info]
-        pred_result = im_detect(aggr_predictors, data_batch, data_names, scales, cfg)
-        roidb_offset += 1
-        frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
+
+        pred_result = im_detect(mem_predictors, data_batch, data_names, scales, gap, cfg)
+        for i in range(gap):
+            roidb_offset += 1
+            fid.write(str(idx)+' '+str(roidb_frame_ids[roidb_idx] + roidb_offset)+' '+str(roidb_frame_ids[roidb_idx])+' '+str(roidb_offset)+'\n')
+            frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
+            process_pred_result(pred_result[i], imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis,
+                            scales)
+            idx += 1
+
         t2 = time.time() - t
         t = time.time()
-        process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis,
-                            feat, scales)
-        idx += test_data.batch_size
+        #idx += test_data.batch_size
         t3 = time.time() - t
         t = time.time()
         data_time += t1
         net_time += t2
         post_time += t3
+        if idx%100==0:
+            print ('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
+                                                                                     data_time / idx * test_data.batch_size,
+                                                                                     net_time / idx * test_data.batch_size,
+                                                                                     post_time / idx * test_data.batch_size))
 
         if logger:
             logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images,
@@ -390,17 +411,17 @@ def apply_async(pool,fun,args):
     payload=dill.dumps((fun,args))
     return pool.apply_async(run_dill_encode,(payload,))
 
-def pred_eval_multiprocess(gpu_num, key_predictors, cur_predictors, test_datas, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True):
+def pred_eval_multiprocess(gpu_num, key_predictors, test_datas, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True):
 
     if cfg.TEST.SEQ_NMS==False:
         if gpu_num == 1:
-            rees = [pred_eval(0, key_predictors[0], cur_predictors[0], test_datas[0], imdb, cfg, vis, thresh, logger,
+            rees = [pred_eval(0, key_predictors[0], test_datas[0], imdb, cfg, vis, thresh, logger,
                              ignore_cache), ]
         else:
             from multiprocessing.pool import ThreadPool as Pool
             pool = Pool(processes=gpu_num)
             multiple_results = [pool.apply_async(pred_eval, args=(
-            i, key_predictors[i], cur_predictors[i], test_datas[i], imdb, cfg, vis, thresh, logger, ignore_cache)) for i
+            i, key_predictors[i], test_datas[i], imdb, cfg, vis, thresh, logger, ignore_cache)) for i
                                 in range(gpu_num)]
             pool.close()
             pool.join()
@@ -514,7 +535,8 @@ def prepare_data(data_list, feat_list, data_batch):
     data_batch.provide_data[0][-1] = ('feat_cache', concat_feat.shape)
 
 
-def process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis, center_image, scales):
+#def process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis, center_image, scales):
+def process_pred_result(pred_result, imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis, scales):
     for delta, (scores, boxes, data_dict) in enumerate(pred_result):
         for j in range(1, imdb.num_classes):
             indexes = np.where(scores[:, j] > thresh)[0]

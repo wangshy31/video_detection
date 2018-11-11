@@ -13,6 +13,8 @@ import time
 import os
 import numpy as np
 import mxnet as mx
+import sys
+import math
 
 from symbols import *
 from dataset import *
@@ -30,10 +32,17 @@ def get_predictor(sym, sym_instance, cfg, arg_params, aux_params, test_data, ctx
     data_names = [k[0] for k in test_data.provide_data_single]
     label_names = None
     feat_stride = int(cfg.network.RCNN_FEAT_STRIDE)
+    h = max([v[0] for v in cfg.SCALES])
+    w = max([v[1] for v in cfg.SCALES])
+    for i in range(4):# num of pooling layers
+        h = math.floor(0.5*(h - 1)) +1
+        w = math.floor(0.5*(w - 1)) +1
+    h, w = int(h), int(w)
     max_data_shape = [[('data', (1, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
-                       ('feat', (1, cfg.network.FGFA_FEAT_DIM,
-                                 max([v[0] for v in cfg.SCALES]) / feat_stride,
-                                 max([v[1] for v in cfg.SCALES]) / feat_stride))
+                       ('mv', (cfg.TRAIN.KEY_FRAME_INTERVAL, 2,
+                               h, w)),
+                       ('residual', (cfg.TRAIN.KEY_FRAME_INTERVAL, 3,
+                                     h,w))
                        #('data_cache', (19, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
                        ]]
 
@@ -54,14 +63,8 @@ def test_rcnn(cfg, dataset, image_set, root_path, dataset_path, motion_iou_path,
     pprint.pprint(cfg)
     logger.info('testing cfg:{}\n'.format(pprint.pformat(cfg)))
 
-    # load symbol and testing data
-
-    feat_sym_instance = eval(cfg.symbol + '.' + cfg.symbol)()
-    aggr_sym_instance = eval(cfg.symbol + '.' + cfg.symbol)()
-
-    feat_sym = feat_sym_instance.get_feat_symbol(cfg)
-    aggr_sym = aggr_sym_instance.get_aggregation_symbol(cfg)
-
+    mem_sym_instance = eval(cfg.symbol + '.' + cfg.symbol)()
+    mem_sym = mem_sym_instance.get_mem_symbol(cfg)
     imdb = eval(dataset)(image_set, root_path, dataset_path, motion_iou_path, result_path=output_path, enable_detailed_eval=enable_detailed_eval)
     roidb = imdb.gt_roidb()
 
@@ -82,8 +85,8 @@ def test_rcnn(cfg, dataset, image_set, root_path, dataset_path, motion_iou_path,
     arg_params, aux_params = load_param(prefix, epoch, process=True)
 
     # create predictor
-    feat_predictors = [get_predictor(feat_sym, feat_sym_instance, cfg, arg_params, aux_params, test_datas[i], [ctx[i]]) for i in range(gpu_num)]
-    aggr_predictors = [get_predictor(aggr_sym, aggr_sym_instance, cfg, arg_params, aux_params, test_datas[i], [ctx[i]]) for i in range(gpu_num)]
+    #feat_predictors = [get_predictor(feat_sym, feat_sym_instance, cfg, arg_params, aux_params, test_datas[i], [ctx[i]]) for i in range(gpu_num)]
+    mem_predictors = [get_predictor(mem_sym, mem_sym_instance, cfg, arg_params, aux_params, test_datas[i], [ctx[i]]) for i in range(gpu_num)]
 
     # start detection
-    pred_eval_multiprocess(gpu_num, feat_predictors, aggr_predictors, test_datas, imdb, cfg, vis=vis, ignore_cache=ignore_cache, thresh=thresh, logger=logger)
+    pred_eval_multiprocess(gpu_num, mem_predictors, test_datas, imdb, cfg, vis=vis, ignore_cache=ignore_cache, thresh=thresh, logger=logger)

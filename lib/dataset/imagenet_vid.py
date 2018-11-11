@@ -60,8 +60,10 @@ class ImageNetVID(IMDB):
                         'n02062744', 'n02391049']
 
         self.num_classes = len(self.classes)
+        self.key_frames = None
         self.load_image_set_index()
         self.num_images = len(self.image_set_index)
+
         print 'num_images', self.num_images
 
     def load_image_set_index(self):
@@ -82,6 +84,15 @@ class ImageNetVID(IMDB):
             self.frame_id = [int(x[1]) for x in lines]
             self.frame_seg_id = [int(x[2]) for x in lines]
             self.frame_seg_len = [int(x[3]) for x in lines]
+            if len(lines[0])>4:
+                self.key_frames = []
+                for x in lines:
+                    dic = {}
+                    for i in range(4, len(x)-1):
+                        dic[int(x[i])] = int(x[i+1])-1
+                    dic[int(x[-1])] = int(x[3])-1
+                    self.key_frames.append(dic)
+
         # return image_set_index, frame_id
 
     def image_path_from_index(self, index):
@@ -133,6 +144,8 @@ class ImageNetVID(IMDB):
             roi_rec['pattern'] = self.image_path_from_index(self.pattern[iindex])
             roi_rec['frame_seg_id'] = self.frame_seg_id[iindex]
             roi_rec['frame_seg_len'] = self.frame_seg_len[iindex]
+            if self.key_frames != None:
+                roi_rec['key_frames'] = self.key_frames[iindex]
 
         if self.det_vid == 'DET':
             filename = os.path.join(self.data_path, 'Annotations', 'DET', index + '.xml')
@@ -357,7 +370,7 @@ class ImageNetVID(IMDB):
                             f.write('{:d} {:d} {:.4f} {:.2f} {:.2f} {:.2f} {:.2f}\n'.
                                     format(frame_ids[im_ind], cls_ind, dets[k, -1],
                                            dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3]))
-    
+
     def do_python_eval(self):
         """
         python evaluation wrapper
@@ -393,7 +406,7 @@ class ImageNetVID(IMDB):
             for i in range(len(self.pattern)):
                 for j in range(self.frame_seg_len[i]):
                     f.write((self.pattern[i] % (self.frame_seg_id[i] + j)) + ' ' + str(self.frame_id[i] + j) + '\n')
-                    
+
         if gpu_number != None:
             filenames = []
             for i in range(gpu_number):
