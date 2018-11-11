@@ -21,6 +21,8 @@ from nms.seq_nms import seq_nms
 from utils.PrefetchingIter import PrefetchingIter
 from collections import deque
 import sys
+import scipy.misc
+import cv2
 
 
 class Predictor(object):
@@ -144,6 +146,15 @@ def im_detect(predictor, data_batch, data_names, scales, gap, cfg):
     pred_boxes_all = []
     res = []
     for output, data_dict, scale in zip(output_all, data_dict_all, scales):
+        #print output['mv'].asnumpy()[0][0]
+        #print output['mv'].asnumpy()[0][1]
+        #images = output['concat10_output'].asnumpy()
+        #shape = images.shape
+        #for i in range(shape[0]):
+            #print np.mean(images[i, :, :, :])
+            #cv2.imwrite('images/'+str(i)+'.jpg', images[i, :, :, np.newaxis])
+
+        #sys.exit()
         if cfg.TEST.HAS_RPN:
             rois = output['concat_rois_output'].asnumpy().reshape(((1+cfg.TRAIN.KEY_FRAME_INTERVAL), -1, 5))
             rois = rois[:gap, :, 1:]
@@ -233,7 +244,6 @@ def pred_eval(gpu_id, mem_predictors, test_data, imdb, cfg, vis=False, thresh=1e
             all_boxes, frame_ids = cPickle.load(fid)
         return all_boxes, frame_ids
 
-    fid = open('frame_id_'+str(gpu_id)+'.txt', 'w')
 
     assert vis or not test_data.shuffle
     data_names = [k[0] for k in test_data.provide_data[0]]
@@ -278,7 +288,6 @@ def pred_eval(gpu_id, mem_predictors, test_data, imdb, cfg, vis=False, thresh=1e
         pred_result = im_detect(mem_predictors, data_batch, data_names, scales, gap, cfg)
         for i in range(gap):
             roidb_offset += 1
-            fid.write(str(idx)+' '+str(roidb_frame_ids[roidb_idx] + roidb_offset)+' '+str(roidb_frame_ids[roidb_idx])+' '+str(roidb_offset)+'\n')
             frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
             process_pred_result(pred_result[i], imdb, thresh, cfg, nms, all_boxes, idx, max_per_image, vis,
                             scales)

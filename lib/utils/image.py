@@ -5,8 +5,8 @@ import random
 from PIL import Image
 from bbox.bbox_transform import clip_boxes
 import sys
-sys.path.append('/ssd/wangshiyao/workspace/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
-#sys.path.append('/home/wangshiyao/Documents/workspace/VID/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
+#sys.path.append('/ssd/wangshiyao/workspace/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
+sys.path.append('/home/wangshiyao/Documents/workspace/VID/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
 from coviar import load
 from visualize_flow import visualize_flow
 import scipy.misc
@@ -290,6 +290,28 @@ def load_vid_nearby_annotation(addr, cur_id, seg_len, flipped, im_info):
                     'im_info': im_info})
     return roi_rec
 
+def read_train_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
+    mv_addr = prefix.replace('/VID/', '/MV/')+'.mv'
+    res_addr = prefix.replace('/VID/', '/RES/')+'.res'
+    #h = math.ceil(im_shape[0]*im_scale) if (im_shape[0]*im_scale)>int((im_shape[0]*im_scale))+0.5 else math.floor(im_shape[0]*im_scale)
+    #w = math.ceil(im_shape[1]*im_scale) if (im_shape[1]*im_scale)>int((im_shape[1]*im_scale))+0.5 else math.floor(im_shape[1]*im_scale)
+    h = im_shape[0]
+    w = im_shape[1]
+    for i in range(4):# num of pooling layers
+        h = math.floor(0.5*(h - 1)) +1
+        w = math.floor(0.5*(w - 1)) +1
+    h, w = int(h), int(w)
+    if pos_target == 0:
+        mv = np.zeros((num_interval, 2, h, w), dtype=np.float16)
+        res = np.zeros((num_interval, 3, h, w), dtype=np.float16)
+        return mv, res
+    mv = np.fromfile(mv_addr, dtype=np.float16)
+    res = np.fromfile(res_addr, dtype=np.float16)
+    assert mv.shape[0]%(2*h*w)==0, 'mv.shape[0]%(2*h*w)==0'
+    assert res.shape[0]%(3*h*w)==0, 'res.shape[0]%(3*h*w)==0'
+    mv = mv.reshape((num_interval, 2, h, w))
+    res = res.reshape((num_interval, 3, h, w))
+    return mv, res
 
 def read_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     mv_addr = prefix.replace('/VID/', '/MV/')+'.mv'
@@ -404,7 +426,7 @@ def get_seg_image(roidb, config):
         prefix = '/'.join(video_name[0:5])+'/'+'-'.join(video_name[5:8])+'-'+str(int(video_name[-1].split('.')[0]))
         begin_pos = int(video_name[-1].split('.')[0])
         pos_target = min(num_interval, roi_rec['frame_seg_len']-begin_pos-1)
-        mv, residual = read_mv_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL, pos_target)
+        mv, residual = read_train_mv_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL, pos_target)
 
         if roidb[i]['flipped']:
             mv = mv[:, :, ::-1, :]
