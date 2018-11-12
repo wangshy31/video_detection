@@ -967,10 +967,10 @@ class MutableModule(BaseModule):
                 if monitor is not None:
                     monitor.tic()
                 self.forward_backward(data_batch)
-                a = self.get_outputs(merge_multi_context=False)
-                a = a[-1][0].asnumpy()
-                mean = [np.mean(a[i, :, :, :]) for i in range(a.shape[0])]
-                print mean
+                #a = self.get_outputs(merge_multi_context=False)
+                #a = a[-1][0].asnumpy()
+                #mean = [np.mean(a[i, :, :, :]) for i in range(a.shape[0])]
+                #print mean
                 self.update()
                 self.update_metric(eval_metric, data_batch.label)
 

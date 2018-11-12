@@ -881,14 +881,24 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         mem_h2h = mx.symbol.Convolution(name='mem_h2h'+str(idx), data=hidden,
                                            num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
                                            stride=(1, 1), no_bias=False)
-        gates = mem_i2h + mem_h2h
-        slice_gates = mx.symbol.SliceChannel(gates, num_outputs=4, name='slice_gates')
+        slice_mem_i2h = mx.symbol.SliceChannel(mem_i2h, num_outputs=4, name='slice_mem_i2h_'+str(idx))
+        concat_mem_i2h = mx.sym.Concat(slice_mem_i2h[0], slice_mem_i2h[1], slice_mem_i2h[2],
+                                       slice_mem_i2h[3], dim=0, name='concat_mem_i2h_'+str(idx))
+        concat_mem_i2h_bn = mx.symbol.BatchNorm(data=concat_mem_i2h, use_global_stats=True,
+                                       eps=self.eps, fix_gamma=False, name='concat_mem_i2h_bn_'+str(idx))
+        slice_mem_h2h = mx.symbol.SliceChannel(mem_h2h, num_outputs=4, name='slice_mem_h2h_'+str(idx))
+        concat_mem_h2h = mx.sym.Concat(slice_mem_h2h[0], slice_mem_h2h[1], slice_mem_h2h[2],
+                                       slice_mem_h2h[3], dim=0, name='concat_mem_h2h_'+str(idx))
+        concat_mem_h2h_bn = mx.symbol.BatchNorm(data=concat_mem_h2h, use_global_stats=True,
+                                       eps=self.eps, fix_gamma=False, name='concat_mem_h2h_bn_'+str(idx))
+        gates = concat_mem_i2h_bn+concat_mem_h2h_bn
+        slice_gates = mx.symbol.SliceChannel(gates, axis=0, num_outputs=4, name='slice_gates')
         in_gate = mx.symbol.Activation(slice_gates[0], act_type="sigmoid", name='in_gate')
         forget_gate = mx.symbol.Activation(slice_gates[1], act_type="sigmoid", name = 'forget_gate')
-        in_transform = mx.symbol.Activation(slice_gates[2], act_type="tanh", name='in_transform')
+        in_transform = mx.symbol.Activation(slice_gates[2], act_type="relu", name='in_transform')
         out_gate = mx.symbol.Activation(slice_gates[3], act_type="sigmoid", name='out_gate')
         next_c = forget_gate * states + in_gate * in_transform
-        next_h = out_gate * mx.symbol.Activation(next_c, act_type="tanh")
+        next_h = out_gate * mx.symbol.Activation(next_c, act_type="relu")
         return next_c, next_h
 
 
@@ -904,6 +914,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         # classification
         rpn_cls_prob = mx.sym.SoftmaxOutput(data=rpn_cls_score_reshape, label=rpn_label, multi_output=True,
                                             normalization='valid', use_ignore=True, ignore_label=-1,
+                                            grad_scale=1.0/cfg.TRAIN.KEY_FRAME_INTERVAL,
                                             name="rpn_cls_prob")
         # bounding box regression
         if cfg.network.NORMALIZE_RPN:
@@ -916,7 +927,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             rpn_bbox_loss_ = rpn_bbox_weight * mx.sym.smooth_l1(name='rpn_bbox_loss_', scalar=3.0,
                                                                 data=(rpn_bbox_pred - rpn_bbox_target))
         rpn_bbox_loss = mx.sym.MakeLoss(name='rpn_bbox_loss', data=rpn_bbox_loss_,
-                                        grad_scale=1.0 / cfg.TRAIN.RPN_BATCH_SIZE)
+                                        grad_scale=1.0 / cfg.TRAIN.RPN_BATCH_SIZE / cfg.TRAIN.KEY_FRAME_INTERVAL)
 
         # ROI proposal
         rpn_cls_act = mx.sym.SoftmaxActivation(
@@ -975,10 +986,11 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                                            cls_score=cls_score, bbox_pred=bbox_pred, labels=label,
                                                            bbox_targets=bbox_target, bbox_weights=bbox_weight)
             cls_prob = mx.sym.SoftmaxOutput(name='cls_prob', data=cls_score, label=labels_ohem, normalization='valid',
+                                            grad_scale = 1.0 / cfg.TRAIN.KEY_FRAME_INTERVAL,
                                             use_ignore=True, ignore_label=-1)
             bbox_loss_ = bbox_weights_ohem * mx.sym.smooth_l1(name='bbox_loss_', scalar=1.0,
                                                               data=(bbox_pred - bbox_target))
-            bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / cfg.TRAIN.BATCH_ROIS_OHEM)
+            bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / cfg.TRAIN.BATCH_ROIS_OHEM / cfg.TRAIN.KEY_FRAME_INTERVAL)
             rcnn_label = labels_ohem
         else:
             cls_prob = mx.sym.SoftmaxOutput(name='cls_prob', data=cls_score, label=label, normalization='valid')
@@ -1037,9 +1049,9 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             concat_feat = mx.sym.Concat(concat_feat, seg_conv_feat, dim=0)
 
 
-        concat_feat_bn = mx.symbol.BatchNorm(name='concat_feat_bn', data=concat_feat, use_global_stats=True,
-                                       eps=self.eps, fix_gamma=False)
-        conv_feats = mx.sym.SliceChannel(concat_feat_bn, axis=1, num_outputs=2)
+        #concat_feat_bn = mx.symbol.BatchNorm(name='concat_feat_bn', data=concat_feat, use_global_stats=True,
+                                       #eps=self.eps, fix_gamma=False)
+        conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
 
         # RPN layers
         rpn_feat = conv_feats[0]
@@ -1075,7 +1087,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             concat_bbox_loss = mx.symbol.Concat(concat_bbox_loss, bbox_loss, dim=0)
             concat_rcnn_label = mx.symbol.Concat(concat_rcnn_label, rcnn_label, dim=0)
 
-        group = mx.sym.Group([concat_rpn_cls_prob, concat_rpn_bbox_loss, concat_cls_prob, concat_bbox_loss, mx.sym.BlockGrad(concat_rcnn_label), mx.sym.BlockGrad(concat_feat_bn)])
+        group = mx.sym.Group([concat_rpn_cls_prob, concat_rpn_bbox_loss, concat_cls_prob, concat_bbox_loss, mx.sym.BlockGrad(concat_rcnn_label)])#, mx.sym.BlockGrad(concat_feat)])
         self.sym = group
         return group
 
@@ -1394,11 +1406,21 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             arg_params['mem_h2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_h2h'+str(i)+'_weight'])
             arg_params['mem_h2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_h2h'+str(i)+'_bias'])
 
-        arg_params['concat_feat_bn_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_feat_bn_gamma'])
-        arg_params['concat_feat_bn_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_feat_bn_beta'])
-        aux_params['concat_feat_bn_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_feat_bn_moving_mean'])
-        aux_params['concat_feat_bn_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_feat_bn_moving_var'])
-        #arg_params['concat_feat_bn_moving_var'] = mx.nd.ones(shape=self.arg_shape_dict['concat_feat_bn_moving_var'])
+            arg_params['concat_mem_i2h_bn_'+str(i)+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_i2h_bn_'+str(i)+'_gamma'])
+            arg_params['concat_mem_i2h_bn_'+str(i)+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_i2h_bn_'+str(i)+'_beta'])
+            aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_i2h_bn_'+str(i)+'_moving_mean'])
+            aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_i2h_bn_'+str(i)+'_moving_var'])
+
+            arg_params['concat_mem_h2h_bn_'+str(i)+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_h2h_bn_'+str(i)+'_gamma'])
+            arg_params['concat_mem_h2h_bn_'+str(i)+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_h2h_bn_'+str(i)+'_beta'])
+            aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_h2h_bn_'+str(i)+'_moving_mean'])
+            aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_h2h_bn_'+str(i)+'_moving_var'])
+
+        #arg_params['concat_feat_bn_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_feat_bn_gamma'])
+        #arg_params['concat_feat_bn_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_feat_bn_beta'])
+        #aux_params['concat_feat_bn_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_feat_bn_moving_mean'])
+        #aux_params['concat_feat_bn_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_feat_bn_moving_var'])
+
 
 
         #arg_params['residual_conv_1x1_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['residual_conv_1x1_weight'])
