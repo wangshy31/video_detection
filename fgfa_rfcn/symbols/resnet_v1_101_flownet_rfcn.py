@@ -1041,9 +1041,10 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
 
         mv = mx.sym.Variable(name="mv")
-        mv_conv_3x3 = mx.sym.Convolution(
-            data=mv, kernel=(1, 1), pad=(0, 0), num_filter=2, num_group=2, name="mv_conv_3x3")
-        mvs = mx.sym.SliceChannel(mv_conv_3x3, axis=0, num_outputs=num_interval)
+        mv = -mv
+        #mv_conv_3x3 = mx.sym.Convolution(
+            #data=mv, kernel=(1, 1), pad=(0, 0), num_filter=2, num_group=2, no_bias=True, name="mv_conv_3x3")
+        mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
         residual = mx.sym.Variable(name="residual")
         residual_conv1 = mx.sym.Convolution(
@@ -1127,6 +1128,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         num_reg_classes = (2 if cfg.CLASS_AGNOSTIC else num_classes)
         data = mx.sym.Variable(name="data")
         mv = mx.sym.Variable(name="mv")
+        mv = -mv
         residual = mx.sym.Variable(name="residual")
         im_info = mx.sym.Variable(name="im_info")
         num_interval = cfg.TRAIN.KEY_FRAME_INTERVAL
@@ -1442,8 +1444,8 @@ class resnet_v1_101_flownet_rfcn(Symbol):
 
         #arg_params['mv_conv_1x1_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mv_conv_1x1_weight'])
         #arg_params['mv_conv_1x1_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mv_conv_1x1_bias'])
-        arg_params['mv_conv_3x3_weight'] = mx.random.normal(1, 0.00, shape=self.arg_shape_dict['mv_conv_3x3_weight'])
-        arg_params['mv_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mv_conv_3x3_bias'])
+        #arg_params['mv_conv_3x3_weight'] = mx.nd.ones(shape=self.arg_shape_dict['mv_conv_3x3_weight'])
+        #arg_params['mv_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mv_conv_3x3_bias'])
 
         for i in range(cfg.TRAIN.KEY_FRAME_INTERVAL):
             arg_params['mem_i2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_i2h'+str(i)+'_weight'])
