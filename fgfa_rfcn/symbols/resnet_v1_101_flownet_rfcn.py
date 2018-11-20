@@ -28,16 +28,22 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         self.workspace = 512
         self.units = (3, 4, 23, 3)  # use for 101
         self.filter_list = [256, 512, 1024, 2048]
-        #self._mem_params = {}
-        #self._mem_params['mem_i2h_weight'] = mx.random.normal(0, 0.01, shape=(1024*4, 1024, 3, 3))
-        #self._mem_params['mem_i2h_bias'] = mx.nd.zeros(shape=(1024*4, ))
-        #self._mem_params['mem_h2h_weight'] = mx.random.normal(0, 0.01, shape=(1024*4, 1024, 3, 3))
-        #self._mem_params['mem_h2h_bias'] = mx.nd.zeros(shape=(1024*4, ))
+        self._mem_params = {}
+        self._mem_params['mem_h2h_weight'] = mx.sym.Variable('mem_h2h_weight')
+        self._mem_params['mem_h2h_bias'] = mx.sym.Variable('mem_h2h_bias')
+        self._mem_params['concat_mem_i2h_bn_gamma'] = mx.sym.Variable('concat_mem_i2h_bn_gamma')
+        self._mem_params['concat_mem_i2h_bn_beta'] = mx.sym.Variable('concat_mem_i2h_bn_beta')
+        self._mem_params['concat_mem_i2h_bn_moving_mean'] = mx.sym.Variable('concat_mem_i2h_bn_moving_mean')
+        self._mem_params['concat_mem_i2h_bn_moving_var'] = mx.sym.Variable('concat_mem_i2h_bn_moving_var')
+        self._mem_params['concat_mem_h2h_bn_gamma'] = mx.sym.Variable('concat_mem_h2h_bn_gamma')
+        self._mem_params['concat_mem_h2h_bn_beta'] = mx.sym.Variable('concat_mem_h2h_bn_beta')
+        self._mem_params['concat_mem_h2h_bn_moving_mean'] = mx.sym.Variable('concat_mem_h2h_bn_moving_mean')
+        self._mem_params['concat_mem_h2h_bn_moving_var'] = mx.sym.Variable('concat_mem_h2h_bn_moving_var')
 
     #def get_mem_params(self):
         #return self._mem_params
     def get_resnet_v1(self, data):
-        conv1 = mx.symbol.Convolution_v1(name='conv1', data=data, num_filter=64, pad=(3, 3), kernel=(7, 7), stride=(2, 2),
+        conv1 = mx.symbol.Convolution(name='conv1', data=data, num_filter=64, pad=(3, 3), kernel=(7, 7), stride=(2, 2),
                                       no_bias=True)
         bn_conv1 = mx.symbol.BatchNorm(name='bn_conv1', data=conv1, use_global_stats=self.use_global_stats,
                                        eps=self.eps, fix_gamma=False)
@@ -887,23 +893,30 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         return next_h
 
     def get_lstm_symbol(self, idx, inputs, states, hidden):
-        #mem_i2h = mx.symbol.Convolution(name='mem_i2h'+str(idx), data=inputs,
-                                           #num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
-                                           #stride=(1, 1), no_bias=False)
         mem_i2h = inputs
-        mem_h2h = mx.symbol.Convolution(name='mem_h2h'+str(idx), data=hidden,
+        mem_h2h = mx.symbol.Convolution_v1(name='mem_h2h'+str(idx), data=hidden,
+                                           weight=self._mem_params['mem_h2h_weight'],
+                                           bias=self._mem_params['mem_h2h_bias'],
                                            num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
                                            stride=(1, 1), no_bias=False)
         slice_mem_i2h = mx.symbol.SliceChannel(mem_i2h, num_outputs=4, name='slice_mem_i2h_'+str(idx))
         concat_mem_i2h = mx.sym.Concat(slice_mem_i2h[0], slice_mem_i2h[1], slice_mem_i2h[2],
                                        slice_mem_i2h[3], dim=0, name='concat_mem_i2h_'+str(idx))
         concat_mem_i2h_bn = mx.symbol.BatchNorm(data=concat_mem_i2h, use_global_stats=True,
-                                       eps=self.eps, fix_gamma=False, name='concat_mem_i2h_bn_'+str(idx))
+                                                gamma = self._mem_params['concat_mem_i2h_bn_gamma'],
+                                                beta = self._mem_params['concat_mem_i2h_bn_beta'],
+                                                moving_mean = self._mem_params['concat_mem_i2h_bn_moving_mean'],
+                                                moving_var = self._mem_params['concat_mem_i2h_bn_moving_var'],
+                                                eps=self.eps, fix_gamma=False, name='concat_mem_i2h_bn_'+str(idx))
         slice_mem_h2h = mx.symbol.SliceChannel(mem_h2h, num_outputs=4, name='slice_mem_h2h_'+str(idx))
         concat_mem_h2h = mx.sym.Concat(slice_mem_h2h[0], slice_mem_h2h[1], slice_mem_h2h[2],
                                        slice_mem_h2h[3], dim=0, name='concat_mem_h2h_'+str(idx))
         concat_mem_h2h_bn = mx.symbol.BatchNorm(data=concat_mem_h2h, use_global_stats=True,
-                                       eps=self.eps, fix_gamma=False, name='concat_mem_h2h_bn_'+str(idx))
+                                                gamma = self._mem_params['concat_mem_h2h_bn_gamma'],
+                                                beta = self._mem_params['concat_mem_h2h_bn_beta'],
+                                                moving_mean = self._mem_params['concat_mem_h2h_bn_moving_mean'],
+                                                moving_var = self._mem_params['concat_mem_h2h_bn_moving_var'],
+                                                eps=self.eps, fix_gamma=False, name='concat_mem_h2h_bn_'+str(idx))
         gates = concat_mem_i2h_bn+concat_mem_h2h_bn
         slice_gates = mx.symbol.SliceChannel(gates, axis=0, num_outputs=4, name='slice_gates')
         in_gate = mx.symbol.Activation(slice_gates[0], act_type="sigmoid", name='in_gate')
@@ -1378,42 +1391,41 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         #arg_params['mv_conv_3x3_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mv_conv_3x3_weight'])
         #arg_params['mv_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mv_conv_3x3_bias'])
 
-        #for i in range(cfg.TRAIN.KEY_FRAME_INTERVAL):
-            #arg_params['mem_i2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_i2h'+str(i)+'_weight'])
-            #arg_params['mem_i2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_i2h'+str(i)+'_bias'])
-            #arg_params['mem_h2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_h2h'+str(i)+'_weight'])
-            #arg_params['mem_h2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_h2h'+str(i)+'_bias'])
+        arg_params['mem_h2h_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_h2h_weight'])
+        arg_params['mem_h2h_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_h2h_bias'])
+        arg_params['concat_mem_i2h_bn_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_i2h_bn_gamma'])
+        arg_params['concat_mem_i2h_bn_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_i2h_bn_beta'])
+        aux_params['concat_mem_i2h_bn_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_i2h_bn_moving_mean'])
+        aux_params['concat_mem_i2h_bn_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_i2h_bn_moving_var'])
 
-        #arg_params['mem_i2h_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_i2h_weight'])
-        #arg_params['mem_i2h_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_i2h_bias'])
-        #arg_params['mem_h2h_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_h2h_weight'])
-        #arg_params['mem_h2h_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_h2h_bias'])
+        arg_params['concat_mem_h2h_bn_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_h2h_bn_gamma'])
+        arg_params['concat_mem_h2h_bn_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_h2h_bn_beta'])
+        aux_params['concat_mem_h2h_bn_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_h2h_bn_moving_mean'])
+        aux_params['concat_mem_h2h_bn_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_h2h_bn_moving_var'])
 
         #arg_params['mv_conv_1x1_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mv_conv_1x1_weight'])
         #arg_params['mv_conv_1x1_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mv_conv_1x1_bias'])
         #arg_params['mv_conv_3x3_weight'] = mx.nd.ones(shape=self.arg_shape_dict['mv_conv_3x3_weight'])
         #arg_params['mv_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mv_conv_3x3_bias'])
 
-        for i in range(cfg.TRAIN.KEY_FRAME_INTERVAL):
+        #for i in range(cfg.TRAIN.KEY_FRAME_INTERVAL):
             #arg_params['mem_i2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_i2h'+str(i)+'_weight'])
             #arg_params['mem_i2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_i2h'+str(i)+'_bias'])
-            arg_params['mem_h2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_h2h'+str(i)+'_weight'])
-            arg_params['mem_h2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_h2h'+str(i)+'_bias'])
+            #arg_params['mem_h2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_h2h'+str(i)+'_weight'])
+            #arg_params['mem_h2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_h2h'+str(i)+'_bias'])
 
-            arg_params['concat_mem_i2h_bn_'+str(i)+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_i2h_bn_'+str(i)+'_gamma'])
-            arg_params['concat_mem_i2h_bn_'+str(i)+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_i2h_bn_'+str(i)+'_beta'])
-            aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_i2h_bn_'+str(i)+'_moving_mean'])
-            aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_i2h_bn_'+str(i)+'_moving_var'])
+            #arg_params['concat_mem_i2h_bn_'+str(i)+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_i2h_bn_'+str(i)+'_gamma'])
+            #arg_params['concat_mem_i2h_bn_'+str(i)+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_i2h_bn_'+str(i)+'_beta'])
+            #aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_i2h_bn_'+str(i)+'_moving_mean'])
+            #aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_i2h_bn_'+str(i)+'_moving_var'])
 
-            arg_params['concat_mem_h2h_bn_'+str(i)+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_h2h_bn_'+str(i)+'_gamma'])
-            arg_params['concat_mem_h2h_bn_'+str(i)+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_h2h_bn_'+str(i)+'_beta'])
-            aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_h2h_bn_'+str(i)+'_moving_mean'])
-            aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_h2h_bn_'+str(i)+'_moving_var'])
+            #arg_params['concat_mem_h2h_bn_'+str(i)+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_h2h_bn_'+str(i)+'_gamma'])
+            #arg_params['concat_mem_h2h_bn_'+str(i)+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_h2h_bn_'+str(i)+'_beta'])
+            #aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_h2h_bn_'+str(i)+'_moving_mean'])
+            #aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_h2h_bn_'+str(i)+'_moving_var'])
 
         arg_params['video_residual_conv_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['video_residual_conv_weight'])
         arg_params['video_residual_conv_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['video_residual_conv_bias'])
-        #arg_params['video_residual_conv2_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['video_residual_conv2_weight'])
-        #arg_params['video_residual_conv2_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['video_residual_conv2_bias'])
         #arg_params['concat_feat_bn_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_feat_bn_gamma'])
         #arg_params['concat_feat_bn_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_feat_bn_beta'])
         #aux_params['concat_feat_bn_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_feat_bn_moving_mean'])
