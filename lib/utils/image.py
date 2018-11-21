@@ -326,7 +326,7 @@ def read_train_mv(prefix, im_info, num_interval, actual_num_interval):
         return mv
     mv = np.fromfile(mv_addr, dtype=np.float16)
     assert mv.shape[0]%(2*h*w)==0, 'mv.shape[0]%(2*h*w)==0'
-    mv = mv.reshape((num_interval, 2, h, w))
+    mv = mv.reshape((-1, 2, h, w))[0:num_interval]
     return mv
 
 
@@ -401,19 +401,34 @@ def get_nearby_images(addr, begin_pos, end_pos, flipped, config):
     scale_ind = random.randrange(len(config.SCALES))
     target_size = config.SCALES[scale_ind][0]
     max_size = config.SCALES[scale_ind][1]
+    cur_addr = '/'.join(addr.split('/')[:-1]) + '/%06d.JPEG'%begin_pos
+    im = cv2.imread(cur_addr, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+    if flipped:
+        im = im[:, ::-1, :]
+    im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
+    im_tensor = transform(im, config.network.PIXEL_MEANS)
+    im_info = [im_tensor.shape[2], im_tensor.shape[3], im_scale]
+    cur_image = im_tensor.copy()
+    #scipy.misc.imsave('images/org.jpg', cur_image[0].transpose(1,2,0))
+
     nearby_images = []
-    im_info = []
-    for i in range(begin_pos, end_pos+1):
+    h = im_info[0]
+    w = im_info[1]
+    for i in range(2):# num of pooling layers
+        h = math.floor(0.5*(h - 1)) +1
+        w = math.floor(0.5*(w - 1)) +1
+    h, w = int(h), int(w)
+    for i in range(begin_pos+1, end_pos+1):
         cur_addr = '/'.join(addr.split('/')[:-1]) + '/%06d.JPEG'%i
         im = cv2.imread(cur_addr, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        shape = im.shape
+        im = cv2.resize(im, None, None, fx=w*1.0/shape[1], fy=h*1.0/shape[0], interpolation=cv2.INTER_LINEAR)
         if flipped:
             im = im[:, ::-1, :]
-        im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
         im_tensor = transform_3d(im, config.network.PIXEL_MEANS)
-        if i == begin_pos:
-            im_info = [im_tensor.shape[1], im_tensor.shape[2], im_scale]
+        #scipy.misc.imsave('images/'+str(i)+'.jpg', im_tensor.transpose(1,2,0))
         nearby_images.append(im_tensor)
-    return nearby_images, im_info
+    return cur_image, nearby_images, im_info
 
 def get_nearby_roi(addr, begin_pos, end_pos, seg_len, flipped, im_info):
     nearby_roi = []
@@ -434,6 +449,7 @@ def get_seg_image(roidb, config):
     """
     num_images = len(roidb)
     processed_ims = []
+    processed_nearby_ims = []
     processed_mv = []
     processed_nearby_roidb = []
     num_interval = config.TRAIN.KEY_FRAME_INTERVAL
@@ -444,12 +460,12 @@ def get_seg_image(roidb, config):
         prefix = '/'.join(image_name[0:5])+'/'+'-'.join(image_name[5:8])+'-'+str(int(image_name[-1].split('.')[0]))
         cur_pos = int(image_name[-1].split('.')[0])
         actual_num_interval = min(num_interval, roi_rec['frame_seg_len'] - cur_pos -1)
-        ims, im_info = get_nearby_images(roi_rec['image'], cur_pos, cur_pos+actual_num_interval,
+        cur_im, nearby_ims, im_info = get_nearby_images(roi_rec['image'], cur_pos, cur_pos+actual_num_interval,
                           roi_rec['flipped'], config)
         nearby_roidb = get_nearby_roi(roi_rec['image'], cur_pos, cur_pos+actual_num_interval,
                                     roi_rec['frame_seg_len'], roi_rec['flipped'], im_info)
         for j in range(actual_num_interval, num_interval):
-            ims.append(ims[-1])
+            nearby_ims.append(nearby_ims[-1])
             nearby_roidb.append(nearby_roidb[-1])
 
         mv = read_train_mv(prefix, im_info, num_interval, actual_num_interval)
@@ -459,13 +475,14 @@ def get_seg_image(roidb, config):
             mv[:, 0, :, :] = -mv[:, 0, :, :]
         #read nearby roi_recs
         #print len(nearby_roidb), mv.shape, residual.shape
-        assert (len(nearby_roidb)-1) == mv.shape[0] == (len(ims)-1), 'len(nearby_roidb) == mv.shape[0] == len(ims)-1'
+        assert (len(nearby_roidb)-1) == mv.shape[0] == (len(nearby_ims)), 'len(nearby_roidb) == mv.shape[0] == len(ims)-1'
 
-        processed_ims.append(ims)
+        processed_ims.append(cur_im)
+        processed_nearby_ims.append(nearby_ims)
         processed_mv.append(mv)
         processed_nearby_roidb.append(nearby_roidb)
 
-    return processed_ims, processed_mv, processed_nearby_roidb
+    return processed_ims, processed_nearby_ims, processed_mv, processed_nearby_roidb
 
 def resize(im, target_size, max_size, stride=0, interpolation = cv2.INTER_LINEAR):
     """

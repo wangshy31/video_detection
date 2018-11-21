@@ -86,11 +86,11 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         workspace=self.workspace
         #assert(num_unit == num_stage)
         data = mx.sym.BatchNorm(data=data, fix_gamma=True, eps=2e-5, momentum=bn_mom, name='bn_data')
-        body = mx.sym.Convolution(data=data, num_filter=self.resnet18_filter_list[0], kernel=(7, 7), stride=(2,2), pad=(3, 3),
+        body = mx.sym.Convolution(data=data, num_filter=self.resnet18_filter_list[0], kernel=(7, 7), stride=(1,1), pad=(3, 3),
                                   no_bias=True, name="conv0", workspace=workspace)
         body = mx.sym.BatchNorm(data=body, fix_gamma=False, eps=2e-5, momentum=bn_mom, name='bn0')
         body = mx.sym.Activation(data=body, act_type='relu', name='relu0')
-        body = mx.symbol.Pooling(data=body, kernel=(3, 3), stride=(2,2), pad=(1,1), pool_type='max')
+        #body = mx.symbol.Pooling(data=body, kernel=(3, 3), stride=(2,2), pad=(1,1), pool_type='max')
         for i in range(num_stage):
             body = self.residual_unit(body, self.resnet18_filter_list[i+1],
                                       (1 if (i==0 or i==3) else 2, 1 if (i==0 or i==3) else 2), False,
@@ -1105,19 +1105,18 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         num_interval = cfg.TRAIN.KEY_FRAME_INTERVAL
 
         data = mx.sym.Variable(name="data")
+        nearby_data = mx.sym.Variable(name="nearby_data")
         im_info = mx.sym.Variable(name="im_info")
         gt_boxes = mx.sym.Variable(name="gt_boxes")
         rpn_label = mx.sym.Variable(name='label')
         rpn_bbox_target = mx.sym.Variable(name='bbox_target')
         rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
-        cur_data = mx.symbol.slice_axis(data, axis=0, begin=0, end=1)
-        nearby_data = mx.symbol.slice_axis(data, axis=0, begin=1, end=num_interval+1)
 
         mv = mx.sym.Variable(name="mv")
         mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
         # pass through ResNet
-        cur_conv_feat = self.get_resnet_v1(cur_data)
+        cur_conv_feat = self.get_resnet_v1(data)
         nearby_conv_feat = self.get_resnet18(nearby_data)
         nearby_conv_feats = mx.sym.SliceChannel(nearby_conv_feat, axis=0, num_outputs=num_interval)
 

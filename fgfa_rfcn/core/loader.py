@@ -192,7 +192,7 @@ class AnchorLoader(mx.io.DataIter):
 
         # decide data and label names
         if config.TRAIN.END2END:
-            self.data_name = ['data','im_info', 'gt_boxes', 'mv']
+            self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'nearby_data']
         else:
             self.data_name = ['data']
         self.label_name = ['label', 'bbox_target', 'bbox_weight']
@@ -278,6 +278,14 @@ class AnchorLoader(mx.io.DataIter):
                 h = math.floor(0.5*(h - 1)) +1
                 w = math.floor(0.5*(w - 1)) +1
             max_data_shape.append(('mv', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 2, int(h), int(w))))
+
+        if 'nearby_data' not in max_data_shape:
+            h = max_data_shape[0][1][2]
+            w = max_data_shape[0][1][3]
+            for i in range(2):# num of pooling layers
+                h = math.floor(0.5*(h - 1)) +1
+                w = math.floor(0.5*(w - 1)) +1
+            max_data_shape.append(('nearby_data', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
 
         #if 'residual' not in max_data_shape:
             #h = max_data_shape[0][1][2]
