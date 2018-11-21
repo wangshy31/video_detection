@@ -167,7 +167,7 @@ def get_rpn_seg_batch(roidb, cfg):
         nearby_gt_boxes = [np.empty((0, 5), dtype=np.float32) for i in range(len(rois))]
 
     data = {'data': np.array(im_array),
-            #'mv': mv_array,
+            'mv': mv_array,
             #'residual': residual_array,
             'im_info': im_info}
     label = {'gt_boxes': np.array(nearby_gt_boxes)}

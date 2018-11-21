@@ -28,20 +28,84 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         self.workspace = 512
         self.units = (3, 4, 23, 3)  # use for 101
         self.filter_list = [256, 512, 1024, 2048]
+        self.resnet18_units = (2, 2, 2, 2)  # use for 18
+        self.resnet18_filter_list = [64, 64, 128, 256, 512]
         self._mem_params = {}
-        self._mem_params['mem_h2h_weight'] = mx.sym.Variable('mem_h2h_weight')
-        self._mem_params['mem_h2h_bias'] = mx.sym.Variable('mem_h2h_bias')
-        self._mem_params['concat_mem_i2h_bn_gamma'] = mx.sym.Variable('concat_mem_i2h_bn_gamma')
-        self._mem_params['concat_mem_i2h_bn_beta'] = mx.sym.Variable('concat_mem_i2h_bn_beta')
-        self._mem_params['concat_mem_i2h_bn_moving_mean'] = mx.sym.Variable('concat_mem_i2h_bn_moving_mean')
-        self._mem_params['concat_mem_i2h_bn_moving_var'] = mx.sym.Variable('concat_mem_i2h_bn_moving_var')
-        self._mem_params['concat_mem_h2h_bn_gamma'] = mx.sym.Variable('concat_mem_h2h_bn_gamma')
-        self._mem_params['concat_mem_h2h_bn_beta'] = mx.sym.Variable('concat_mem_h2h_bn_beta')
-        self._mem_params['concat_mem_h2h_bn_moving_mean'] = mx.sym.Variable('concat_mem_h2h_bn_moving_mean')
-        self._mem_params['concat_mem_h2h_bn_moving_var'] = mx.sym.Variable('concat_mem_h2h_bn_moving_var')
+        self._mem_params['new_feat_conv_weight'] = mx.sym.Variable('new_feat_conv_weight')
+        self._mem_params['new_feat_conv_bias'] = mx.sym.Variable('new_feat_conv_bias')
+        #self._mem_params['concat_mem_h2h_bn_gamma'] = mx.sym.Variable('concat_mem_h2h_bn_gamma')
+        #self._mem_params['concat_mem_h2h_bn_beta'] = mx.sym.Variable('concat_mem_h2h_bn_beta')
+        #self._mem_params['concat_mem_h2h_bn_moving_mean'] = mx.sym.Variable('concat_mem_h2h_bn_moving_mean')
+        #self._mem_params['concat_mem_h2h_bn_moving_var'] = mx.sym.Variable('concat_mem_h2h_bn_moving_var')
 
     #def get_mem_params(self):
         #return self._mem_params
+    def residual_unit(self, data, num_filter, stride, dim_match, name, bottle_neck=True, bn_mom=0.9, workspace=512, memonger=False):
+        if bottle_neck:
+            # the same as https://github.com/facebook/fb.resnet.torch#notes, a bit difference with origin paper
+            bn1 = mx.sym.BatchNorm(data=data, fix_gamma=False, eps=2e-5, momentum=bn_mom, name=name + '_bn1')
+            act1 = mx.sym.Activation(data=bn1, act_type='relu', name=name + '_relu1')
+            conv1 = mx.sym.Convolution(data=act1, num_filter=int(num_filter*0.25), kernel=(1,1), stride=(1,1), pad=(0,0),
+                                        no_bias=True, workspace=workspace, name=name + '_conv1')
+            bn2 = mx.sym.BatchNorm(data=conv1, fix_gamma=False, eps=2e-5, momentum=bn_mom, name=name + '_bn2')
+            act2 = mx.sym.Activation(data=bn2, act_type='relu', name=name + '_relu2')
+            conv2 = mx.sym.Convolution(data=act2, num_filter=int(num_filter*0.25), kernel=(3,3), stride=stride, pad=(1,1),
+                                        no_bias=True, workspace=workspace, name=name + '_conv2')
+            bn3 = mx.sym.BatchNorm(data=conv2, fix_gamma=False, eps=2e-5, momentum=bn_mom, name=name + '_bn3')
+            act3 = mx.sym.Activation(data=bn3, act_type='relu', name=name + '_relu3')
+            conv3 = mx.sym.Convolution(data=act3, num_filter=num_filter, kernel=(1,1), stride=(1,1), pad=(0,0), no_bias=True,
+                                    workspace=workspace, name=name + '_conv3')
+            if dim_match:
+                shortcut = data
+            else:
+                shortcut = mx.sym.Convolution(data=act1, num_filter=num_filter, kernel=(1,1), stride=stride, no_bias=True,
+                                                workspace=workspace, name=name+'_sc')
+            if memonger:
+                shortcut._set_attr(mirror_stage='True')
+            return conv3 + shortcut
+        else:
+            bn1 = mx.sym.BatchNorm(data=data, fix_gamma=False, momentum=bn_mom, eps=2e-5, name=name + '_bn1')
+            act1 = mx.sym.Activation(data=bn1, act_type='relu', name=name + '_relu1')
+            conv1 = mx.sym.Convolution(data=act1, num_filter=num_filter, kernel=(3,3), stride=stride, pad=(1,1),
+                                        no_bias=True, workspace=workspace, name=name + '_conv1')
+            bn2 = mx.sym.BatchNorm(data=conv1, fix_gamma=False, momentum=bn_mom, eps=2e-5, name=name + '_bn2')
+            act2 = mx.sym.Activation(data=bn2, act_type='relu', name=name + '_relu2')
+            conv2 = mx.sym.Convolution(data=act2, num_filter=num_filter, kernel=(3,3), stride=(1,1), pad=(1,1),
+                                        no_bias=True, workspace=workspace, name=name + '_conv2')
+            if dim_match:
+                shortcut = data
+            else:
+                shortcut = mx.sym.Convolution(data=act1, num_filter=num_filter, kernel=(1,1), stride=stride, no_bias=True,
+                                                workspace=workspace, name=name+'_sc')
+            if memonger:
+                shortcut._set_attr(mirror_stage='True')
+            return conv2 + shortcut
+
+    def get_resnet18(self, data, num_stage=4, bn_mom=0.9, memonger=False):
+        num_unit = len(self.resnet18_units)
+        workspace=self.workspace
+        #assert(num_unit == num_stage)
+        data = mx.sym.BatchNorm(data=data, fix_gamma=True, eps=2e-5, momentum=bn_mom, name='bn_data')
+        body = mx.sym.Convolution(data=data, num_filter=self.resnet18_filter_list[0], kernel=(7, 7), stride=(2,2), pad=(3, 3),
+                                  no_bias=True, name="conv0", workspace=workspace)
+        body = mx.sym.BatchNorm(data=body, fix_gamma=False, eps=2e-5, momentum=bn_mom, name='bn0')
+        body = mx.sym.Activation(data=body, act_type='relu', name='relu0')
+        body = mx.symbol.Pooling(data=body, kernel=(3, 3), stride=(2,2), pad=(1,1), pool_type='max')
+        for i in range(num_stage):
+            body = self.residual_unit(body, self.resnet18_filter_list[i+1],
+                                      (1 if (i==0 or i==3) else 2, 1 if (i==0 or i==3) else 2), False,
+                                name='stage%d_unit%d' % (i + 1, 1), bottle_neck=False, workspace=workspace,
+                                memonger=memonger)
+            for j in range(self.resnet18_units[i]-1):
+                body = self.residual_unit(body, self.resnet18_filter_list[i+1], (1,1), True, name='stage%d_unit%d' % (i + 1, j + 2),
+                                    bottle_neck=False, workspace=workspace, memonger=memonger)
+        bn1 = mx.sym.BatchNorm(data=body, fix_gamma=False, eps=2e-5, momentum=bn_mom, name='bn1')
+        relu1 = mx.sym.Activation(data=bn1, act_type='relu', name='relu1')
+        embed_conv_3x3 = mx.sym.Convolution(
+            data=relu1, kernel=(3, 3), pad=(6, 6), dilate=(6, 6), num_filter=1024, name="embed_conv_3x3")
+        embed_conv_3x3_relu = mx.sym.Activation(data=embed_conv_3x3, act_type="relu", name="embed_conv_3x3_relu")
+        return embed_conv_3x3_relu
+
     def get_resnet_v1(self, data):
         conv1 = mx.symbol.Convolution(name='conv1', data=data, num_filter=64, pad=(3, 3), kernel=(7, 7), stride=(2, 2),
                                       no_bias=True)
@@ -1046,10 +1110,16 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         rpn_label = mx.sym.Variable(name='label')
         rpn_bbox_target = mx.sym.Variable(name='bbox_target')
         rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
+        cur_data = mx.symbol.slice_axis(data, axis=0, begin=0, end=1)
+        nearby_data = mx.symbol.slice_axis(data, axis=0, begin=1, end=num_interval+1)
 
-        #mv = mx.sym.Variable(name="mv")
-        #mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
+        mv = mx.sym.Variable(name="mv")
+        mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
+        # pass through ResNet
+        cur_conv_feat = self.get_resnet_v1(cur_data)
+        nearby_conv_feat = self.get_resnet18(nearby_data)
+        nearby_conv_feats = mx.sym.SliceChannel(nearby_conv_feat, axis=0, num_outputs=num_interval)
 
         rpn_label_slice = mx.sym.SliceChannel(rpn_label, axis=0, num_outputs=num_interval+1)
         rpn_bbox_target_slice = mx.sym.SliceChannel(rpn_bbox_target, axis=0,
@@ -1058,20 +1128,21 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                                      num_outputs=num_interval+1)
         gt_boxes_slice = mx.sym.SliceChannel(gt_boxes, axis=0,
                                                      num_outputs=num_interval+1)
-        # pass through ResNet
-        conv_feat = self.get_resnet_v1(data)
-        #a,b,c = conv_feat.infer_shape(data=(12,3,800,1000))
-        #print b
-        #hidden_conv_feat = conv_feat
-        #concat_feat = conv_feat
-        #for i in range(num_interval):
-            #flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
-            #warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
-            #warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
-            #cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
-            #concat_feat = mx.sym.Concat(concat_feat, cell_conv_feat, dim=0)
+        concat_feat = cur_conv_feat
+        tmp_feat = cur_conv_feat
+        for i in range(num_interval):
+            flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
+            warp_conv_feat = mx.sym.BilinearSampler(data=tmp_feat, grid=flow_grid)
+            #new_feat = mx.sym.Concat(warp_conv_feat, nearby_conv_feats[i], dim=1)
+            #new_feat_conv = mx.symbol.Convolution(name='new_feat_conv_'+str(i), data=new_feat, num_filter=1024,
+                                                  #weight=self._mem_params['new_feat_conv_weight'],
+                                                  #bias=self._mem_params['new_feat_conv_bias'],
+                                                  #pad=(1, 1), kernel=(3, 3), stride=(1, 1), no_bias=False)
+            #new_feat_relu = mx.symbol.Activation(name='new_feat_relu', data=new_feat_conv, act_type='relu')
+            tmp_feat = warp_conv_feat + nearby_conv_feats[i]
+            concat_feat = mx.sym.Concat(concat_feat, tmp_feat, dim=0)
 
-        conv_feats = mx.sym.SliceChannel(conv_feat, axis=1, num_outputs=2)
+        conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
 
         # RPN layers
         rpn_feat = conv_feats[0]
@@ -1379,9 +1450,10 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         return group
 
     def init_weight(self, cfg, arg_params, aux_params):
-        return
-        #arg_params['feat_conv_3x3_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['feat_conv_3x3_weight'])
-        #arg_params['feat_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['feat_conv_3x3_bias'])
+        arg_params['embed_conv_3x3_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['embed_conv_3x3_weight'])
+        arg_params['embed_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['embed_conv_3x3_bias'])
+        #arg_params['new_feat_conv_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['new_feat_conv_weight'])
+        #arg_params['new_feat_conv_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['new_feat_conv_bias'])
         #arg_params['mv_conv_3x3_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mv_conv_3x3_weight'])
         #arg_params['mv_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mv_conv_3x3_bias'])
 

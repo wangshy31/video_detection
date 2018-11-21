@@ -27,6 +27,7 @@ config.default.kvstore = 'device'
 # network related params
 config.network = edict()
 config.network.pretrained = ''
+config.network.pretrained_mini = ''
 config.network.pretrained_flow = ''
 config.network.pretrained_epoch = 0
 config.network.PIXEL_MEANS = np.array([0, 0, 0])

@@ -49,7 +49,7 @@ from utils.load_model import load_param
 from utils.PrefetchingIter import PrefetchingIter
 from utils.lr_scheduler import WarmupMultiFactorScheduler
 
-def train_net(args, ctx, pretrained, pretrained_flow, epoch, prefix, begin_epoch, end_epoch, lr, lr_step):
+def train_net(args, ctx, pretrained, pretrained_mini, epoch, prefix, begin_epoch, end_epoch, lr, lr_step):
     logger, final_output_path = create_logger(config.output_path, args.cfg, config.dataset.image_set)
     prefix = os.path.join(final_output_path, prefix)
 
@@ -100,9 +100,9 @@ def train_net(args, ctx, pretrained, pretrained_flow, epoch, prefix, begin_epoch
         arg_params, aux_params = load_param(prefix, begin_epoch, convert=True)
     else:
         arg_params, aux_params = load_param(pretrained, epoch, convert=True)
-        #arg_params_flow, aux_params_flow = load_param(pretrained_flow, epoch, convert=True)
-        #arg_params.update(arg_params_flow)
-        #aux_params.update(aux_params_flow)
+        arg_params_mini, aux_params_mini = load_param(pretrained_mini, epoch, convert=True)
+        arg_params.update(arg_params_mini)
+        aux_params.update(aux_params_mini)
         sym_instance.init_weight(config, arg_params, aux_params)
 
     # check parameter shapes
@@ -167,7 +167,7 @@ def train_net(args, ctx, pretrained, pretrained_flow, epoch, prefix, begin_epoch
 def main():
     print('Called with argument:', args)
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
-    train_net(args, ctx, config.network.pretrained, config.network.pretrained_flow, config.network.pretrained_epoch, config.TRAIN.model_prefix,
+    train_net(args, ctx, config.network.pretrained, config.network.pretrained_mini, config.network.pretrained_epoch, config.TRAIN.model_prefix,
               config.TRAIN.begin_epoch, config.TRAIN.end_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
 
 if __name__ == '__main__':
