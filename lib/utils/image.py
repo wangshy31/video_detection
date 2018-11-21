@@ -313,6 +313,23 @@ def read_train_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     res = res.reshape((num_interval, 3, h, w))
     return mv, res
 
+def read_train_mv(prefix, im_info, num_interval, actual_num_interval):
+    mv_addr = prefix.replace('/VID/', '/MV/')+'.mv'
+    h = im_info[0]
+    w = im_info[1]
+    for i in range(4):# num of pooling layers
+        h = math.floor(0.5*(h - 1)) +1
+        w = math.floor(0.5*(w - 1)) +1
+    h, w = int(h), int(w)
+    if actual_num_interval == 0:
+        mv = np.zeros((num_interval, 2, h, w), dtype=np.float16)
+        return mv
+    mv = np.fromfile(mv_addr, dtype=np.float16)
+    assert mv.shape[0]%(2*h*w)==0, 'mv.shape[0]%(2*h*w)==0'
+    mv = mv.reshape((num_interval, 2, h, w))
+    return mv
+
+
 def read_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     mv_addr = prefix.replace('/VID/', '/MV/')+'.mv'
     res_addr = prefix.replace('/VID/', '/RES/')+'.res'
@@ -379,6 +396,25 @@ def parse_residual(video_addr, gop_target, pos_target, im_scale):
         #scipy.misc.imsave('images/res_'+str(i)+'.jpg', residual[i].squeeze())
     return resize_residual
 
+
+def get_nearby_images(addr, begin_pos, end_pos, flipped, config):
+    scale_ind = random.randrange(len(config.SCALES))
+    target_size = config.SCALES[scale_ind][0]
+    max_size = config.SCALES[scale_ind][1]
+    nearby_images = []
+    im_info = []
+    for i in range(begin_pos, end_pos+1):
+        cur_addr = '/'.join(addr.split('/')[:-1]) + '/%06d.JPEG'%i
+        im = cv2.imread(cur_addr, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        if flipped:
+            im = im[:, ::-1, :]
+        im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
+        im_tensor = transform_3d(im, config.network.PIXEL_MEANS)
+        if i == begin_pos:
+            im_info = [im_tensor.shape[1], im_tensor.shape[2], im_scale]
+        nearby_images.append(im_tensor)
+    return nearby_images, im_info
+
 def get_nearby_roi(addr, begin_pos, end_pos, seg_len, flipped, im_info):
     nearby_roi = []
     for i in range(begin_pos, end_pos+1):
@@ -399,54 +435,37 @@ def get_seg_image(roidb, config):
     num_images = len(roidb)
     processed_ims = []
     processed_mv = []
-    processed_residual = []
     processed_nearby_roidb = []
     num_interval = config.TRAIN.KEY_FRAME_INTERVAL
-    #processed_roidb = []
     for i in range(num_images):
         roi_rec = roidb[i]
         assert os.path.exists(roi_rec['image']), '%s does not exist'.format(roi_rec['image'])
-        im = cv2.imread(roi_rec['image'], cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-        if roidb[i]['flipped']:
-            im = im[:, ::-1, :]
+        image_name = roi_rec['image'].split('/')
+        prefix = '/'.join(image_name[0:5])+'/'+'-'.join(image_name[5:8])+'-'+str(int(image_name[-1].split('.')[0]))
+        cur_pos = int(image_name[-1].split('.')[0])
+        actual_num_interval = min(num_interval, roi_rec['frame_seg_len'] - cur_pos -1)
+        ims, im_info = get_nearby_images(roi_rec['image'], cur_pos, cur_pos+actual_num_interval,
+                          roi_rec['flipped'], config)
+        nearby_roidb = get_nearby_roi(roi_rec['image'], cur_pos, cur_pos+actual_num_interval,
+                                    roi_rec['frame_seg_len'], roi_rec['flipped'], im_info)
+        for j in range(actual_num_interval, num_interval):
+            ims.append(ims[-1])
+            nearby_roidb.append(nearby_roidb[-1])
 
-        #new_rec = roi_rec.copy()
-        scale_ind = random.randrange(len(config.SCALES))
-        target_size = config.SCALES[scale_ind][0]
-        max_size = config.SCALES[scale_ind][1]
-
-        im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
-        im_tensor = transform(im, config.network.PIXEL_MEANS)
-
-        im_info = [im_tensor.shape[2], im_tensor.shape[3], im_scale]
-        #new_rec['boxes'] = roi_rec['boxes'].copy() * im_scale
-        #new_rec['im_info'] = im_info
-
-        video_name = roi_rec['image'].split('/')
-        prefix = '/'.join(video_name[0:5])+'/'+'-'.join(video_name[5:8])+'-'+str(int(video_name[-1].split('.')[0]))
-        begin_pos = int(video_name[-1].split('.')[0])
-        pos_target = min(num_interval, roi_rec['frame_seg_len']-begin_pos-1)
-        mv, residual = read_train_mv_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL, pos_target)
+        mv = read_train_mv(prefix, im_info, num_interval, actual_num_interval)
 
         if roidb[i]['flipped']:
             mv = mv[:, :, ::-1, :]
-            residual = residual[:, :, ::-1, :]
+            mv[:, 0, :, :] = -mv[:, 0, :, :]
         #read nearby roi_recs
-        nearby_roidb = get_nearby_roi(roi_rec['image'], begin_pos, begin_pos+pos_target,
-                                    roi_rec['frame_seg_len'], roi_rec['flipped'], im_info)
-        for j in range(pos_target, num_interval):
-            nearby_roidb.append(nearby_roidb[-1])
         #print len(nearby_roidb), mv.shape, residual.shape
-        assert (len(nearby_roidb)-1) == mv.shape[0] == residual.shape[0], 'len(nearby_roidb) == mv.shape[0] == residual.shape[0]'
+        assert (len(nearby_roidb)-1) == mv.shape[0] == (len(ims)-1), 'len(nearby_roidb) == mv.shape[0] == len(ims)-1'
 
-
-        processed_ims.append(im_tensor)
-        #processed_roidb.append(new_rec)
+        processed_ims.append(ims)
         processed_mv.append(mv)
-        processed_residual.append(residual)
         processed_nearby_roidb.append(nearby_roidb)
 
-    return processed_ims, processed_mv, processed_residual, processed_nearby_roidb
+    return processed_ims, processed_mv, processed_nearby_roidb
 
 def resize(im, target_size, max_size, stride=0, interpolation = cv2.INTER_LINEAR):
     """
@@ -492,6 +511,19 @@ def transform(im, pixel_means):
     for i in range(3):
         im_tensor[0, i, :, :] = im[:, :, 2 - i] - pixel_means[2 - i]
     return im_tensor
+def transform_3d(im, pixel_means):
+    """
+    transform into mxnet tensor
+    substract pixel size and transform to correct format
+    :param im: [height, width, channel] in BGR
+    :param pixel_means: [B, G, R pixel means]
+    :return: [batch, channel, height, width]
+    """
+    im_tensor = np.zeros((3, im.shape[0], im.shape[1]))
+    for i in range(3):
+        im_tensor[i, :, :] = im[:, :, 2 - i] - pixel_means[2 - i]
+    return im_tensor
+
 
 def transform_seg_gt(gt):
     """

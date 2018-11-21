@@ -16,6 +16,7 @@ from rpn.rpn import get_rpn_testbatch, get_rpn_seg_batch, assign_anchor
 from rcnn import get_rcnn_testbatch, get_rcnn_batch
 import collections
 import math
+import sys
 
 class TestLoader(mx.io.DataIter):
     def __init__(self, roidb, config, batch_size=1, shuffle=False,
@@ -191,7 +192,7 @@ class AnchorLoader(mx.io.DataIter):
 
         # decide data and label names
         if config.TRAIN.END2END:
-            self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'residual']
+            self.data_name = ['data','im_info', 'gt_boxes']
         else:
             self.data_name = ['data']
         self.label_name = ['label', 'bbox_target', 'bbox_weight']
@@ -270,21 +271,21 @@ class AnchorLoader(mx.io.DataIter):
         if max_label_shape is None:
             max_label_shape = []
 
-        if 'mv' not in max_data_shape:
-            h = max_data_shape[0][1][2]
-            w = max_data_shape[0][1][3]
-            for i in range(4):# num of pooling layers
-                h = math.floor(0.5*(h - 1)) +1
-                w = math.floor(0.5*(w - 1)) +1
-            max_data_shape.append(('mv', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 2, int(h), int(w))))
+        #if 'mv' not in max_data_shape:
+            #h = max_data_shape[0][1][2]
+            #w = max_data_shape[0][1][3]
+            #for i in range(4):# num of pooling layers
+                #h = math.floor(0.5*(h - 1)) +1
+                #w = math.floor(0.5*(w - 1)) +1
+            #max_data_shape.append(('mv', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 2, int(h), int(w))))
 
-        if 'residual' not in max_data_shape:
-            h = max_data_shape[0][1][2]
-            w = max_data_shape[0][1][3]
-            for i in range(4):# num of pooling layers
-                h = math.floor(0.5*(h - 1)) +1
-                w = math.floor(0.5*(w - 1)) +1
-            max_data_shape.append(('residual', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
+        #if 'residual' not in max_data_shape:
+            #h = max_data_shape[0][1][2]
+            #w = max_data_shape[0][1][3]
+            #for i in range(4):# num of pooling layers
+                #h = math.floor(0.5*(h - 1)) +1
+                #w = math.floor(0.5*(w - 1)) +1
+            #max_data_shape.append(('residual', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
 
 
         max_shapes = dict(max_data_shape + max_label_shape)

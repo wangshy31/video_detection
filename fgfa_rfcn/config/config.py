@@ -123,7 +123,7 @@ config.TRAIN.BBOX_STDS = (0.1, 0.1, 0.2, 0.2)
 # FGFA, trained image sampled from [min_offset, max_offset]
 config.TRAIN.MIN_OFFSET = -9
 config.TRAIN.MAX_OFFSET = 9
-config.TRAIN.KEY_FRAME_INTERVAL = 10
+config.TRAIN.KEY_FRAME_INTERVAL = 11
 
 config.TEST = edict()
 

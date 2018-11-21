@@ -132,14 +132,12 @@ def get_rpn_seg_batch(roidb, cfg):
     :return: data, label
     """
     assert len(roidb) == 1, 'Single batch only'
-    imgs, mv, residual, nearby_roidb = get_seg_image(roidb, cfg)
+    imgs, mv, nearby_roidb = get_seg_image(roidb, cfg)
 
     im_array = imgs[0]
     mv_array = mv[0]
-    residual_array = residual[0]
+    #residual_array = residual[0]
     rois = nearby_roidb[0]
-    #bef_im_array = bef_imgs[0]
-    #aft_im_array = aft_imgs[0]
 
     im_info = np.array([rois[0]['im_info']], dtype=np.float32)
 
@@ -168,9 +166,9 @@ def get_rpn_seg_batch(roidb, cfg):
     else:
         nearby_gt_boxes = [np.empty((0, 5), dtype=np.float32) for i in range(len(rois))]
 
-    data = {'data': im_array,
-            'mv': mv_array,
-            'residual': residual_array,
+    data = {'data': np.array(im_array),
+            #'mv': mv_array,
+            #'residual': residual_array,
             'im_info': im_info}
     label = {'gt_boxes': np.array(nearby_gt_boxes)}
     return data, label
