@@ -58,45 +58,49 @@ def get_test_seg_image(roidb, cur_frame, end_frame, config):
     """
     num_images = len(roidb)
     processed_ims = []
+    processed_nearby_ims = []
     processed_mv = []
-    processed_residual = []
     processed_nearby_roidb = []
+    num_interval = config.TRAIN.KEY_FRAME_INTERVAL
     for i in range(num_images):
         roi_rec = roidb[i]
         assert os.path.exists(roi_rec['image']), '%s does not exist'.format(roi_rec['image'])
-        im = cv2.imread(roi_rec['image'], cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-        if roidb[i]['flipped']:
-            im = im[:, ::-1, :]
+        image_name = roi_rec['image'].split('/')
+        prefix = '/'.join(image_name[0:5])+'/'+'-'.join(image_name[5:7])+'-'+str(int(image_name[-1].split('.')[0]))
+        actual_num_interval = end_frame - cur_frame
+        cur_im, nearby_ims, im_info = get_nearby_images(roi_rec['image'], cur_frame, cur_frame+actual_num_interval,
+                          roi_rec['flipped'], config)
+        nearby_roidb = get_nearby_roi(roi_rec['image'], cur_frame, end_frame,
+                                    roi_rec['frame_seg_len'], roi_rec['flipped'], im_info)
+        for j in range(actual_num_interval, num_interval):
+            if len(nearby_ims)>0:
+                nearby_ims.append(nearby_ims[-1])
+            nearby_roidb.append(nearby_roidb[-1])
+        if len(nearby_ims)==0:
+            h = im_info[0]
+            w = im_info[1]
+            for j in range(2):# num of pooling layers
+                h = math.floor(0.5*(h - 1)) +1
+                w = math.floor(0.5*(w - 1)) +1
+            h, w = int(h), int(w)
+            nearby_ims = np.zeros((num_interval, 3, h, w))
 
-        scale_ind = random.randrange(len(config.SCALES))
-        target_size = config.SCALES[scale_ind][0]
-        max_size = config.SCALES[scale_ind][1]
-
-        im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
-        im_tensor = transform(im, config.network.PIXEL_MEANS)
-        im_info = [im_tensor.shape[2], im_tensor.shape[3], im_scale]
-
-        video_name = roi_rec['image'].split('/')
-        prefix = '/'.join(video_name[0:5])+'/'+'-'.join(video_name[5:7])+'-'+str(int(video_name[-1].split('.')[0]))
-        pos_target = end_frame - cur_frame
-        mv, residual = read_mv_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL, pos_target)
+        mv = read_mv(prefix, im_info, num_interval, actual_num_interval)
 
         if roidb[i]['flipped']:
             mv = mv[:, :, ::-1, :]
-            residual = residual[:, :, ::-1, :]
+            mv[:, 0, :, :] = -mv[:, 0, :, :]
         #read nearby roi_recs
-        nearby_roidb = get_nearby_roi(roi_rec['image'], cur_frame, end_frame,
-                                    roi_rec['frame_seg_len'], roi_rec['flipped'], im_info)
-        for j in range(end_frame - cur_frame, config.TRAIN.KEY_FRAME_INTERVAL):
-            nearby_roidb.append(nearby_roidb[-1])
-        assert (len(nearby_roidb)-1) == mv.shape[0] == residual.shape[0], 'len(nearby_roidb) == mv.shape[0] == residual.shape[0]'
+        #print len(nearby_roidb), mv.shape, residual.shape
+        assert (len(nearby_roidb)-1) == mv.shape[0] == (len(nearby_ims)), 'len(nearby_roidb) == mv.shape[0] == len(ims)-1'
 
-        processed_ims.append(im_tensor)
+        processed_ims.append(cur_im)
+        processed_nearby_ims.append(nearby_ims)
         processed_mv.append(mv)
-        processed_residual.append(residual)
         processed_nearby_roidb.append(nearby_roidb)
 
-    return processed_ims, processed_mv, processed_residual, processed_nearby_roidb
+    return processed_ims, processed_nearby_ims, processed_mv, processed_nearby_roidb
+
 
 
 def get_pair_image(roidb, config):
@@ -329,6 +333,24 @@ def read_train_mv(prefix, im_info, num_interval, actual_num_interval):
     mv = mv.reshape((-1, 2, h, w))[0:num_interval]
     return mv
 
+def read_mv(prefix, im_info, num_interval, actual_num_interval):
+    mv_addr = prefix.replace('/VID/', '/MV/')+'.mv'
+    h = im_info[0]
+    w = im_info[1]
+    for i in range(4):# num of pooling layers
+        h = math.floor(0.5*(h - 1)) +1
+        w = math.floor(0.5*(w - 1)) +1
+    h, w = int(h), int(w)
+    if actual_num_interval == 0:
+        mv = np.zeros((num_interval, 2, h, w), dtype=np.float16)
+        return mv
+    mv = np.fromfile(mv_addr, dtype=np.float16)
+    assert mv.shape[0]%(2*h*w)==0, 'mv.shape[0]%(2*h*w)==0'
+    if mv.shape[0] > num_interval*2*h*w:
+        mv = mv[:num_interval*2*h*w]
+    mv = mv.reshape((actual_num_interval, 2, h, w))
+    mv = np.pad(mv, ((0, num_interval - actual_num_interval), (0,0), (0,0), (0,0)), 'constant')
+    return mv
 
 def read_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     mv_addr = prefix.replace('/VID/', '/MV/')+'.mv'
@@ -426,7 +448,6 @@ def get_nearby_images(addr, begin_pos, end_pos, flipped, config):
         if flipped:
             im = im[:, ::-1, :]
         im_tensor = transform_3d(im, config.network.PIXEL_MEANS)
-        #scipy.misc.imsave('images/'+str(i)+'.jpg', im_tensor.transpose(1,2,0))
         nearby_images.append(im_tensor)
     return cur_image, nearby_images, im_info
 
@@ -468,18 +489,18 @@ def get_seg_image(roidb, config):
             nearby_ims.append(nearby_ims[-1])
             nearby_roidb.append(nearby_roidb[-1])
 
-        mv = read_train_mv(prefix, im_info, num_interval, actual_num_interval)
+        #mv = read_train_mv(prefix, im_info, num_interval, actual_num_interval)
 
-        if roidb[i]['flipped']:
-            mv = mv[:, :, ::-1, :]
-            mv[:, 0, :, :] = -mv[:, 0, :, :]
+        #if roidb[i]['flipped']:
+            #mv = mv[:, :, ::-1, :]
+            #mv[:, 0, :, :] = -mv[:, 0, :, :]
         #read nearby roi_recs
         #print len(nearby_roidb), mv.shape, residual.shape
-        assert (len(nearby_roidb)-1) == mv.shape[0] == (len(nearby_ims)), 'len(nearby_roidb) == mv.shape[0] == len(ims)-1'
+        #assert (len(nearby_roidb)-1) == mv.shape[0] == (len(nearby_ims)), 'len(nearby_roidb) == mv.shape[0] == len(ims)-1'
 
         processed_ims.append(cur_im)
         processed_nearby_ims.append(nearby_ims)
-        processed_mv.append(mv)
+        #processed_mv.append(mv)
         processed_nearby_roidb.append(nearby_roidb)
 
     return processed_ims, processed_nearby_ims, processed_mv, processed_nearby_roidb

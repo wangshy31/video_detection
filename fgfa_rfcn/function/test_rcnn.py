@@ -38,11 +38,16 @@ def get_predictor(sym, sym_instance, cfg, arg_params, aux_params, test_data, ctx
         h = math.floor(0.5*(h - 1)) +1
         w = math.floor(0.5*(w - 1)) +1
     h, w = int(h), int(w)
+
+    near_h = max([v[0] for v in cfg.SCALES])
+    near_w = max([v[1] for v in cfg.SCALES])
+    for i in range(2):# num of pooling layers
+        near_h = math.floor(0.5*(near_h - 1)) +1
+        near_w = math.floor(0.5*(near_w - 1)) +1
+    near_h, near_w = int(near_h), int(near_w)
     max_data_shape = [[('data', (1, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
-                       ('mv', (cfg.TRAIN.KEY_FRAME_INTERVAL, 2,
-                               h, w)),
-                       ('residual', (cfg.TRAIN.KEY_FRAME_INTERVAL, 3,
-                                     h,w))
+                       ('nearby_data', (cfg.TRAIN.KEY_FRAME_INTERVAL, 3, near_h, near_w)),
+                       ('mv', (cfg.TRAIN.KEY_FRAME_INTERVAL, 2, h, w)),
                        #('data_cache', (19, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
                        ]]
 

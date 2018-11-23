@@ -23,6 +23,8 @@ from collections import deque
 import sys
 import scipy.misc
 import cv2
+import matplotlib.pyplot as plt
+import matplotlib
 
 
 class Predictor(object):
@@ -146,15 +148,20 @@ def im_detect(predictor, data_batch, data_names, scales, gap, cfg):
     pred_boxes_all = []
     res = []
     for output, data_dict, scale in zip(output_all, data_dict_all, scales):
-        #print output['mv'].asnumpy()[0][0]
-        #print output['mv'].asnumpy()[0][1]
-        #images = output['concat10_output'].asnumpy()
+        #print output
+        #images = output['nearby_data'].asnumpy()
         #shape = images.shape
         #for i in range(shape[0]):
-            #print np.mean(images[i, :, :, :])
-            #cv2.imwrite('images/'+str(i)+'.jpg', images[i, :, :, np.newaxis])
-
+            #tmp = np.mean(images[i, :, :, :], axis=0, keepdims=False)
+            #plt.pcolor(tmp,cmap=plt.cm.Reds)
+            #plt.savefig('pics/'+strnearby_data(i)+'.png')
+            #tmp = images[i,:, :, :].transpose(1,2,0)
+            #cv2.imwrite('pics/'+str(i)+'.jpg', tmp)
+            #cv2.imwrite('images/'+str(i)+'.png', tmp)
+            #scipy.misc.imsave('images/'+str(i)+'.jpg', tmp)
+            #scipy.misc.toimage(tmp, cmin = np.min(tmp), cmax=np.max(tmp)).save('images/'+str(i)+'.jpg')
         #sys.exit()
+
         if cfg.TEST.HAS_RPN:
             rois = output['concat_rois_output'].asnumpy().reshape(((1+cfg.TRAIN.KEY_FRAME_INTERVAL), -1, 5))
             rois = rois[:gap, :, 1:]

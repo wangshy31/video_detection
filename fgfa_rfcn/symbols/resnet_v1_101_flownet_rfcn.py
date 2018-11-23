@@ -1004,7 +1004,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         # classification
         rpn_cls_prob = mx.sym.SoftmaxOutput(data=rpn_cls_score_reshape, label=rpn_label, multi_output=True,
                                             normalization='valid', use_ignore=True, ignore_label=-1,
-                                            grad_scale=1.0/cfg.TRAIN.KEY_FRAME_INTERVAL,
+                                            #grad_scale=1.0/cfg.TRAIN.KEY_FRAME_INTERVAL,
                                             name="rpn_cls_prob")
         # bounding box regression
         if cfg.network.NORMALIZE_RPN:
@@ -1017,7 +1017,8 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             rpn_bbox_loss_ = rpn_bbox_weight * mx.sym.smooth_l1(name='rpn_bbox_loss_', scalar=3.0,
                                                                 data=(rpn_bbox_pred - rpn_bbox_target))
         rpn_bbox_loss = mx.sym.MakeLoss(name='rpn_bbox_loss', data=rpn_bbox_loss_,
-                                        grad_scale=1.0 / cfg.TRAIN.RPN_BATCH_SIZE / cfg.TRAIN.KEY_FRAME_INTERVAL)
+                                        grad_scale=1.0 / cfg.TRAIN.RPN_BATCH_SIZE )
+                                        #grad_scale=1.0 / cfg.TRAIN.RPN_BATCH_SIZE / cfg.TRAIN.KEY_FRAME_INTERVAL)
 
         # ROI proposal
         rpn_cls_act = mx.sym.SoftmaxActivation(
@@ -1076,11 +1077,12 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                                            cls_score=cls_score, bbox_pred=bbox_pred, labels=label,
                                                            bbox_targets=bbox_target, bbox_weights=bbox_weight)
             cls_prob = mx.sym.SoftmaxOutput(name='cls_prob', data=cls_score, label=labels_ohem, normalization='valid',
-                                            grad_scale = 1.0 / cfg.TRAIN.KEY_FRAME_INTERVAL,
+                                            #grad_scale = 1.0 / cfg.TRAIN.KEY_FRAME_INTERVAL,
                                             use_ignore=True, ignore_label=-1)
             bbox_loss_ = bbox_weights_ohem * mx.sym.smooth_l1(name='bbox_loss_', scalar=1.0,
                                                               data=(bbox_pred - bbox_target))
-            bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / cfg.TRAIN.BATCH_ROIS_OHEM / cfg.TRAIN.KEY_FRAME_INTERVAL)
+            bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / cfg.TRAIN.BATCH_ROIS_OHEM)
+            #bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / cfg.TRAIN.BATCH_ROIS_OHEM / cfg.TRAIN.KEY_FRAME_INTERVAL)
             rcnn_label = labels_ohem
         else:
             cls_prob = mx.sym.SoftmaxOutput(name='cls_prob', data=cls_score, label=label, normalization='valid')
@@ -1112,13 +1114,13 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         rpn_bbox_target = mx.sym.Variable(name='bbox_target')
         rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
 
-        mv = mx.sym.Variable(name="mv")
-        mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
+        #mv = mx.sym.Variable(name="mv")
+        #mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
         # pass through ResNet
         cur_conv_feat = self.get_resnet_v1(data)
         nearby_conv_feat = self.get_resnet18(nearby_data)
-        nearby_conv_feats = mx.sym.SliceChannel(nearby_conv_feat, axis=0, num_outputs=num_interval)
+        #nearby_conv_feats = mx.sym.SliceChannel(nearby_conv_feat, axis=0, num_outputs=num_interval)
 
         rpn_label_slice = mx.sym.SliceChannel(rpn_label, axis=0, num_outputs=num_interval+1)
         rpn_bbox_target_slice = mx.sym.SliceChannel(rpn_bbox_target, axis=0,
@@ -1127,19 +1129,21 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                                      num_outputs=num_interval+1)
         gt_boxes_slice = mx.sym.SliceChannel(gt_boxes, axis=0,
                                                      num_outputs=num_interval+1)
-        concat_feat = cur_conv_feat
-        tmp_feat = cur_conv_feat
-        for i in range(num_interval):
-            flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
-            warp_conv_feat = mx.sym.BilinearSampler(data=tmp_feat, grid=flow_grid)
+
+        concat_feat = mx.sym.Concat(cur_conv_feat, nearby_conv_feat, dim=0)
+        #concat_feat = cur_conv_feat
+        #tmp_feat = cur_conv_feat
+        #for i in range(num_interval):
+            #flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
+            #warp_conv_feat = mx.sym.BilinearSampler(data=tmp_feat, grid=flow_grid)
             #new_feat = mx.sym.Concat(warp_conv_feat, nearby_conv_feats[i], dim=1)
             #new_feat_conv = mx.symbol.Convolution(name='new_feat_conv_'+str(i), data=new_feat, num_filter=1024,
                                                   #weight=self._mem_params['new_feat_conv_weight'],
                                                   #bias=self._mem_params['new_feat_conv_bias'],
                                                   #pad=(1, 1), kernel=(3, 3), stride=(1, 1), no_bias=False)
             #new_feat_relu = mx.symbol.Activation(name='new_feat_relu', data=new_feat_conv, act_type='relu')
-            tmp_feat = warp_conv_feat + nearby_conv_feats[i]
-            concat_feat = mx.sym.Concat(concat_feat, tmp_feat, dim=0)
+            #tmp_feat = warp_conv_feat + nearby_conv_feats[i]
+            #concat_feat = mx.sym.Concat(concat_feat, tmp_feat, dim=0)
 
         conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
 
@@ -1186,33 +1190,41 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         num_anchors = cfg.network.NUM_ANCHORS
         num_classes = cfg.dataset.NUM_CLASSES
         num_reg_classes = (2 if cfg.CLASS_AGNOSTIC else num_classes)
-        data = mx.sym.Variable(name="data")
-        im_info = mx.sym.Variable(name="im_info")
         num_interval = cfg.TRAIN.KEY_FRAME_INTERVAL
-        # shared convolutional layers
+
+        data = mx.sym.Variable(name="data")
+        nearby_data = mx.sym.Variable(name="nearby_data")
+        im_info = mx.sym.Variable(name="im_info")
+        gt_boxes = mx.sym.Variable(name="gt_boxes")
+        rpn_label = mx.sym.Variable(name='label')
+        rpn_bbox_target = mx.sym.Variable(name='bbox_target')
+        rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
 
         mv = mx.sym.Variable(name="mv")
         mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
-        residual = mx.sym.Variable(name="residual")
-        residual_conv = mx.symbol.Convolution(name='video_residual_conv', data=residual,
-                                           num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
-                                           stride=(1, 1), no_bias=False)
-        residuals = mx.sym.SliceChannel(residual_conv, axis=0, num_outputs=num_interval)
-
         # pass through ResNet
-        conv_feat = self.get_resnet_v1(data)
-        cell_conv_feat = conv_feat
-        hidden_conv_feat = conv_feat
-        concat_feat = conv_feat
+        cur_conv_feat = self.get_resnet_v1(data)
+        nearby_conv_feat = self.get_resnet18(nearby_data)
+        nearby_conv_feats = mx.sym.SliceChannel(nearby_conv_feat, axis=0, num_outputs=num_interval)
+
+        rpn_label_slice = mx.sym.SliceChannel(rpn_label, axis=0, num_outputs=num_interval+1)
+        rpn_bbox_target_slice = mx.sym.SliceChannel(rpn_bbox_target, axis=0,
+                                                     num_outputs=num_interval+1)
+        rpn_bbox_weight_slice = mx.sym.SliceChannel(rpn_bbox_weight, axis=0,
+                                                     num_outputs=num_interval+1)
+        gt_boxes_slice = mx.sym.SliceChannel(gt_boxes, axis=0,
+                                                     num_outputs=num_interval+1)
+        concat_feat = cur_conv_feat
+        tmp_feat = cur_conv_feat
         for i in range(num_interval):
             flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
-            warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
-            warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
-            cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
-            concat_feat = mx.sym.Concat(concat_feat, cell_conv_feat, dim=0)
+            warp_conv_feat = mx.sym.BilinearSampler(data=tmp_feat, grid=flow_grid)
+            tmp_feat = warp_conv_feat - nearby_conv_feats[i]*0.000
+            concat_feat = mx.sym.Concat(concat_feat, warp_conv_feat, dim=0)
 
         conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
+
 
         # RPN layers
         rpn_feat = conv_feats[0]
@@ -1246,7 +1258,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             concat_bbox_pred = mx.symbol.Concat(concat_bbox_pred, bbox_pred, dim=0, name='concat_bbox_pred')
 
 
-        group = mx.sym.Group([data, concat_rois, concat_cls_prob, concat_bbox_pred, concat_feat, mv])
+        group = mx.sym.Group([data, concat_rois, concat_cls_prob, concat_bbox_pred])
         self.sym = group
 
         return group
