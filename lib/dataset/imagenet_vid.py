@@ -253,14 +253,14 @@ class ImageNetVID(IMDB):
         path = os.path.join(res_file_folder, filename)
         return path
 
-    def get_result_file_template(self):
-        """
-        :return: a string template
-        """
-        res_file_folder = os.path.join(self.result_path, 'results')
-        filename = 'det_' + self.image_set + '_{:s}.txt'
-        path = os.path.join(res_file_folder, filename)
-        return path
+#    def get_result_file_template(self):
+        #"""
+        #:return: a string template
+        #"""
+        #res_file_folder = os.path.join(self.result_path, 'results')
+        #filename = 'det_' + self.image_set + '_{:s}.txt'
+        #path = os.path.join(res_file_folder, filename)
+        #return path
 
     def write_vid_results_multiprocess(self, detection, gpu_id):
         """
@@ -324,52 +324,52 @@ class ImageNetVID(IMDB):
                                        dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3]))
         return
 
-    def write_vid_results(self, all_boxes):
-        """
-        write results files in pascal devkit path
-        :param all_boxes: boxes to be processed [bbox, confidence]
-        :return: None
-        """
-        print 'Writing {} ImageNetVID results file'.format('all')
-        filename = self.get_result_file_template().format('all')
-        with open(filename, 'wt') as f:
-            for im_ind, index in enumerate(self.image_set_index):
-                for cls_ind, cls in enumerate(self.classes):
-                    if cls == '__background__':
-                        continue
-                    dets = all_boxes[cls_ind][im_ind]
-                    if len(dets) == 0:
-                        continue
-                    # the imagenet expects 0-based indices
-                    for k in range(dets.shape[0]):
-                        f.write('{:d} {:d} {:.4f} {:.2f} {:.2f} {:.2f} {:.2f}\n'.
-                                format(self.frame_id[im_ind], cls_ind, dets[k, -1],
-                                       dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3]))
+#    def write_vid_results(self, all_boxes):
+        #"""
+        #write results files in pascal devkit path
+        #:param all_boxes: boxes to be processed [bbox, confidence]
+        #:return: None
+        #"""
+        #print 'Writing {} ImageNetVID results file'.format('all')
+        #filename = self.get_result_file_template().format('all')
+        #with open(filename, 'wt') as f:
+            #for im_ind, index in enumerate(self.image_set_index):
+                #for cls_ind, cls in enumerate(self.classes):
+                    #if cls == '__background__':
+                        #continue
+                    #dets = all_boxes[cls_ind][im_ind]
+                    #if len(dets) == 0:
+                        #continue
+                    ## the imagenet expects 0-based indices
+                    #for k in range(dets.shape[0]):
+                        #f.write('{:d} {:d} {:.4f} {:.2f} {:.2f} {:.2f} {:.2f}\n'.
+                                #format(self.frame_id[im_ind], cls_ind, dets[k, -1],
+                                       #dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3]))
 
-    def write_vid_results_multiprocess(self, detections):
-        """
-        write results files in pascal devkit path
-        :param all_boxes: boxes to be processed [bbox, confidence]
-        :return: None
-        """
-        print 'Writing {} ImageNetVID results file'.format('all')
-        filename = self.get_result_file_template().format('all')
-        with open(filename, 'wt') as f:
-            for detection in detections:
-                all_boxes = detection[0]
-                frame_ids = detection[1]
-                for im_ind in range(len(frame_ids)):
-                    for cls_ind, cls in enumerate(self.classes):
-                        if cls == '__background__':
-                            continue
-                        dets = all_boxes[cls_ind][im_ind]
-                        if len(dets) == 0:
-                            continue
-                        # the imagenet expects 0-based indices
-                        for k in range(dets.shape[0]):
-                            f.write('{:d} {:d} {:.4f} {:.2f} {:.2f} {:.2f} {:.2f}\n'.
-                                    format(frame_ids[im_ind], cls_ind, dets[k, -1],
-                                           dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3]))
+#    def write_vid_results_multiprocess(self, detections):
+        #"""
+        #write results files in pascal devkit path
+        #:param all_boxes: boxes to be processed [bbox, confidence]
+        #:return: None
+        #"""
+        #print 'Writing {} ImageNetVID results file'.format('all')
+        #filename = self.get_result_file_template().format('all')
+        #with open(filename, 'wt') as f:
+            #for detection in detections:
+                #all_boxes = detection[0]
+                #frame_ids = detection[1]
+                #for im_ind in range(len(frame_ids)):
+                    #for cls_ind, cls in enumerate(self.classes):
+                        #if cls == '__background__':
+                            #continue
+                        #dets = all_boxes[cls_ind][im_ind]
+                        #if len(dets) == 0:
+                            #continue
+                        ## the imagenet expects 0-based indices
+                        #for k in range(dets.shape[0]):
+                            #f.write('{:d} {:d} {:.4f} {:.2f} {:.2f} {:.2f} {:.2f}\n'.
+                                    #format(frame_ids[im_ind], cls_ind, dets[k, -1],
+                                           #dets[k, 0], dets[k, 1], dets[k, 2], dets[k, 3]))
 
     def do_python_eval(self):
         """

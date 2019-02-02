@@ -446,9 +446,13 @@ def pred_eval_multiprocess(gpu_num, key_predictors, test_datas, imdb, cfg, vis=F
             from multiprocessing.pool import ThreadPool as Pool
 
             pool = Pool(processes=gpu_num)
+            #multiple_results = [pool.apply_async(pred_eval, args=(
+            #i, key_predictors[i], cur_predictors[i], test_datas[i], imdb, cfg, vis, thresh, logger, ignore_cache)) for i in
+                                #range(gpu_num)]
+
             multiple_results = [pool.apply_async(pred_eval, args=(
-            i, key_predictors[i], cur_predictors[i], test_datas[i], imdb, cfg, vis, thresh, logger, ignore_cache)) for i in
-                                range(gpu_num)]
+            i, key_predictors[i], test_datas[i], imdb, cfg, vis, thresh, logger, ignore_cache)) for i
+                                in range(gpu_num)]
             pool.close()
             pool.join()
             res = [res.get() for res in multiple_results]

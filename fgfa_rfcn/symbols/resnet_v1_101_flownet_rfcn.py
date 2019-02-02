@@ -1126,8 +1126,8 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         num_interval = cfg.TRAIN.KEY_FRAME_INTERVAL
         # shared convolutional layers
 
-        #mv = mx.sym.Variable(name="mv")
-        #mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
+        mv = mx.sym.Variable(name="mv")
+        mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
         residual = mx.sym.Variable(name="residual")
         residual_conv = mx.symbol.Convolution(name='video_residual_conv', data=residual,
@@ -1141,10 +1141,12 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         hidden_conv_feat = conv_feat
         concat_feat = conv_feat
         for i in range(num_interval):
-            #flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
-            #warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
-            #warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
-            cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], cell_conv_feat, hidden_conv_feat)
+            flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
+            warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
+            warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
+            cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
+            # res+lstm
+            #cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], cell_conv_feat, hidden_conv_feat)
             concat_feat = mx.sym.Concat(concat_feat, cell_conv_feat, dim=0)
 
         conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
