@@ -5,8 +5,8 @@ import random
 from PIL import Image
 from bbox.bbox_transform import clip_boxes
 import sys
-#sys.path.append('/ssd/wangshiyao/workspace/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
-sys.path.append('/home/wangshiyao/Documents/workspace/VID/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
+sys.path.append('/ssd/wangshiyao/workspace/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
+#sys.path.append('/home/wangshiyao/Documents/workspace/VID/cvpr2019/video_detection/fgfa_rfcn/core/build/lib.linux-x86_64-2.7')
 from coviar import load
 from visualize_flow import visualize_flow
 import scipy.misc
@@ -311,6 +311,7 @@ def read_train_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     assert res.shape[0]%(3*h*w)==0, 'res.shape[0]%(3*h*w)==0'
     mv = mv.reshape((num_interval, 2, h, w))
     res = res.reshape((num_interval, 3, h, w))
+    mv = -mv
     return mv, res
 
 def read_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
@@ -339,6 +340,7 @@ def read_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     res = res.reshape((pos_target, 3, h, w))
     mv = np.pad(mv, ((0, num_interval - pos_target), (0,0), (0,0), (0,0)), 'constant')
     res = np.pad(res, ((0, num_interval - pos_target), (0,0), (0,0), (0,0)), 'constant')
+    mv = -mv
     return mv, res
     #mv = np.fromfile()
 def parse_mv(video_addr, gop_target, pos_target, im_scale):

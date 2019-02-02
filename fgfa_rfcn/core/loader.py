@@ -34,7 +34,9 @@ class TestLoader(mx.io.DataIter):
         self.index = np.arange(self.size)
 
         # decide data and label names (only for training)
-        self.data_name = ['data', 'mv', 'residual', 'im_info']#, 'data_cache', 'feat_cache']
+        #self.data_name = ['data', 'mv', 'residual', 'im_info']#, 'data_cache', 'feat_cache']
+        # for residual, without mv
+        self.data_name = ['data', 'residual', 'im_info']#, 'data_cache', 'feat_cache']
         self.label_name = None
 
         #
@@ -117,7 +119,7 @@ class TestLoader(mx.io.DataIter):
             self.key_frame_flag = 2
 
         extend_data = [{'data': data[0]['data'] ,
-                        'mv': data[0]['mv'],
+                        #'mv': data[0]['mv'],
                         'residual': data[0]['residual'],
                         'im_info': data[0]['im_info']}]
         self.data = [[mx.nd.array(extend_data[i][name]) for name in self.data_name] for i in xrange(len(data))]
@@ -136,7 +138,7 @@ class TestLoader(mx.io.DataIter):
             self.key_frame_flag = 2
 
         extend_data = [{'data': data[0]['data'],
-                        'mv': data[0]['mv'],
+                        #'mv': data[0]['mv'],
                         'residual': data[0]['residual'],
                         'im_info': data[0]['im_info'],
                         'num_interval': end_frame-self.cur_frameid+1}]
@@ -191,7 +193,8 @@ class AnchorLoader(mx.io.DataIter):
 
         # decide data and label names
         if config.TRAIN.END2END:
-            self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'residual']
+            self.data_name = ['data','im_info', 'gt_boxes', 'mv']
+            #self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'residual']
         else:
             self.data_name = ['data']
         self.label_name = ['label', 'bbox_target', 'bbox_weight']
@@ -278,13 +281,13 @@ class AnchorLoader(mx.io.DataIter):
                 w = math.floor(0.5*(w - 1)) +1
             max_data_shape.append(('mv', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 2, int(h), int(w))))
 
-        if 'residual' not in max_data_shape:
-            h = max_data_shape[0][1][2]
-            w = max_data_shape[0][1][3]
-            for i in range(4):# num of pooling layers
-                h = math.floor(0.5*(h - 1)) +1
-                w = math.floor(0.5*(w - 1)) +1
-            max_data_shape.append(('residual', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
+        #if 'residual' not in max_data_shape:
+            #h = max_data_shape[0][1][2]
+            #w = max_data_shape[0][1][3]
+            #for i in range(4):# num of pooling layers
+                #h = math.floor(0.5*(h - 1)) +1
+                #w = math.floor(0.5*(w - 1)) +1
+            #max_data_shape.append(('residual', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
 
 
         max_shapes = dict(max_data_shape + max_label_shape)
