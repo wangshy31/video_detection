@@ -903,21 +903,25 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                            num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
                                            stride=(1, 1), no_bias=False)
         slice_mem_i2h = mx.symbol.SliceChannel(mem_i2h, num_outputs=4, name='slice_mem_i2h_'+str(idx))
-        concat_mem_i2h = mx.sym.Concat(slice_mem_i2h[0], slice_mem_i2h[1], slice_mem_i2h[2],
-                                       slice_mem_i2h[3], dim=0, name='concat_mem_i2h_'+str(idx))
-        concat_mem_i2h_bn = mx.symbol.BatchNorm(data=concat_mem_i2h, use_global_stats=True,
-                                       eps=self.eps, fix_gamma=False, name='concat_mem_i2h_bn_'+str(idx))
+        #concat_mem_i2h = mx.sym.Concat(slice_mem_i2h[0], slice_mem_i2h[1], slice_mem_i2h[2],
+                                       #slice_mem_i2h[3], dim=0, name='concat_mem_i2h_'+str(idx))
+        #concat_mem_i2h_bn = mx.symbol.BatchNorm(data=concat_mem_i2h, use_global_stats=True,
+                                       #eps=self.eps, fix_gamma=False, name='concat_mem_i2h_bn_'+str(idx))
         slice_mem_h2h = mx.symbol.SliceChannel(mem_h2h, num_outputs=4, name='slice_mem_h2h_'+str(idx))
-        concat_mem_h2h = mx.sym.Concat(slice_mem_h2h[0], slice_mem_h2h[1], slice_mem_h2h[2],
-                                       slice_mem_h2h[3], dim=0, name='concat_mem_h2h_'+str(idx))
-        concat_mem_h2h_bn = mx.symbol.BatchNorm(data=concat_mem_h2h, use_global_stats=True,
-                                       eps=self.eps, fix_gamma=False, name='concat_mem_h2h_bn_'+str(idx))
-        gates = concat_mem_i2h_bn+concat_mem_h2h_bn
-        slice_gates = mx.symbol.SliceChannel(gates, axis=0, num_outputs=4, name='slice_gates')
-        in_gate = mx.symbol.Activation(slice_gates[0], act_type="sigmoid", name='in_gate')
-        forget_gate = mx.symbol.Activation(slice_gates[1], act_type="sigmoid", name = 'forget_gate')
-        in_transform = mx.symbol.Activation(slice_gates[2], act_type="relu", name='in_transform')
-        out_gate = mx.symbol.Activation(slice_gates[3], act_type="sigmoid", name='out_gate')
+        #concat_mem_h2h = mx.sym.Concat(slice_mem_h2h[0], slice_mem_h2h[1], slice_mem_h2h[2],
+                                       #slice_mem_h2h[3], dim=0, name='concat_mem_h2h_'+str(idx))
+        #concat_mem_h2h_bn = mx.symbol.BatchNorm(data=concat_mem_h2h, use_global_stats=True,
+                                       #eps=self.eps, fix_gamma=False, name='concat_mem_h2h_bn_'+str(idx))
+        #gates = concat_mem_i2h+concat_mem_h2h
+        gates0 = slice_mem_i2h[0]+slice_mem_h2h[0]
+        gates1 = slice_mem_i2h[1]+slice_mem_h2h[1]
+        gates2 = slice_mem_i2h[2]+slice_mem_h2h[2]
+        gates3 = slice_mem_i2h[3]+slice_mem_h2h[3]
+        #slice_gates = mx.symbol.SliceChannel(gates, axis=0, num_outputs=4, name='slice_gates')
+        in_gate = mx.symbol.Activation(gates0, act_type="sigmoid", name='in_gate')
+        forget_gate = mx.symbol.Activation(gates1, act_type="sigmoid", name = 'forget_gate')
+        in_transform = mx.symbol.Activation(gates2, act_type="relu", name='in_transform')
+        out_gate = mx.symbol.Activation(gates3, act_type="sigmoid", name='out_gate')
         next_c = forget_gate * states + in_gate * in_transform
         next_h = out_gate * mx.symbol.Activation(next_c, act_type="relu")
         return next_c, next_h
@@ -1045,11 +1049,11 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         mv = mx.sym.Variable(name="mv")
         mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
-        #residual = mx.sym.Variable(name="residual")
-        #residual_conv = mx.symbol.Convolution(name='video_residual_conv', data=residual,
-                                           #num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
-                                           #stride=(1, 1), no_bias=False)
-        #residuals = mx.sym.SliceChannel(residual_conv, axis=0, num_outputs=num_interval)
+        residual = mx.sym.Variable(name="residual")
+        residual_conv = mx.symbol.Convolution(name='video_residual_conv', data=residual,
+                                           num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
+                                           stride=(1, 1), no_bias=False)
+        residuals = mx.sym.SliceChannel(residual_conv, axis=0, num_outputs=num_interval)
 
         rpn_label_slice = mx.sym.SliceChannel(rpn_label, axis=0, num_outputs=num_interval+1)
         rpn_bbox_target_slice = mx.sym.SliceChannel(rpn_bbox_target, axis=0,
@@ -1060,23 +1064,19 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                                      num_outputs=num_interval+1)
         # pass through ResNet
         conv_feat = self.get_resnet_v1(data)
-        # for residual
-        #cell_conv_feat = conv_feat
+        cell_conv_feat = conv_feat
         hidden_conv_feat = conv_feat
         concat_feat = conv_feat
         for i in range(num_interval):
             flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
-            #warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
+            warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
             warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
-            #cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
+            cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
+            concat_feat = mx.sym.Concat(concat_feat, cell_conv_feat, dim=0)
 
-            # residual, without mv
-            #cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], cell_conv_feat, hidden_conv_feat)
-            # mv, without residual
-            hidden_conv_feat = self.get_rnn_symbol(i, warp_hidden_feat)
-            concat_feat = mx.sym.Concat(concat_feat, hidden_conv_feat, dim=0)
-
-        conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
+        concat_feat_bn = mx.symbol.BatchNorm(data=concat_feat, use_global_stats=True,
+                                       eps=self.eps, fix_gamma=False, name='concat_feat_bn')
+        conv_feats = mx.sym.SliceChannel(concat_feat_bn, axis=1, num_outputs=2)
 
         # RPN layers
         rpn_feat = conv_feats[0]
@@ -1413,18 +1413,18 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             arg_params['mem_h2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_h2h'+str(i)+'_weight'])
             arg_params['mem_h2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_h2h'+str(i)+'_bias'])
 
-            #arg_params['concat_mem_i2h_bn_'+str(i)+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_i2h_bn_'+str(i)+'_gamma'])
-            #arg_params['concat_mem_i2h_bn_'+str(i)+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_i2h_bn_'+str(i)+'_beta'])
-            #aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_i2h_bn_'+str(i)+'_moving_mean'])
-            #aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_i2h_bn_'+str(i)+'_moving_var'])
+        arg_params['concat_feat_bn'+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_feat_bn'+'_gamma'])
+        arg_params['concat_feat_bn'+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_feat_bn'+'_beta'])
+        aux_params['concat_feat_bn'+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_feat_bn'+'_moving_mean'])
+        aux_params['concat_feat_bn'+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_feat_bn'+'_moving_var'])
 
             #arg_params['concat_mem_h2h_bn_'+str(i)+'_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_mem_h2h_bn_'+str(i)+'_gamma'])
             #arg_params['concat_mem_h2h_bn_'+str(i)+'_beta'] = mx.nd.zeros(shape=self.arg_shape_dict['concat_mem_h2h_bn_'+str(i)+'_beta'])
             #aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_mean'] = mx.nd.zeros(shape=self.aux_shape_dict['concat_mem_h2h_bn_'+str(i)+'_moving_mean'])
             #aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_var'] = mx.nd.ones(shape=self.aux_shape_dict['concat_mem_h2h_bn_'+str(i)+'_moving_var'])
 
-        #arg_params['video_residual_conv_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['video_residual_conv_weight'])
-        #arg_params['video_residual_conv_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['video_residual_conv_bias'])
+        arg_params['video_residual_conv_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['video_residual_conv_weight'])
+        arg_params['video_residual_conv_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['video_residual_conv_bias'])
         #arg_params['video_residual_conv2_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['video_residual_conv2_weight'])
         #arg_params['video_residual_conv2_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['video_residual_conv2_bias'])
         #arg_params['concat_feat_bn_gamma'] = mx.nd.ones(shape=self.arg_shape_dict['concat_feat_bn_gamma'])
