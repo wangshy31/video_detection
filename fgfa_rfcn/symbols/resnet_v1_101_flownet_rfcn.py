@@ -30,41 +30,25 @@ class resnet_v1_101_flownet_rfcn(Symbol):
 
 
     def get_multiscale_attention(self, res2c_relu, res3b3_relu, res4b22_relu, res5c_relu):
-
-        multiscale_res2c_pool1 = mx.symbol.Pooling(name='multiscale_res2c_pool1', data=res2c_relu,
-                                                   pad=(1, 1), kernel=(3, 3), stride=(2, 2), pool_type='avg')
-        multiscale_res2c_pool2 = mx.symbol.Pooling(name='multiscale_res2c_pool2', data=multiscale_res2c_pool1,
-                                                   pad=(1, 1), kernel=(3, 3), stride=(2, 2), pool_type='avg')
         multiscale_res3b_pool1 = mx.symbol.Pooling(name='multiscale_res3b_pool1', data=res3b3_relu,
                                                    pad=(1, 1), kernel=(3, 3), stride=(2, 2), pool_type='avg')
 
-        multiscale_res2c_embed = mx.symbol.Convolution(name='multiscale_res2c_embed', data=multiscale_res2c_pool2, num_filter=2048,
-                                               pad=(1, 1), kernel=(3, 3), stride=(1, 1))
-        multiscale_res2c_embed_act = mx.symbol.Activation(name='multiscale_res2c_embed_act',
-                                                          data=multiscale_res2c_embed, act_type='relu')
         multiscale_res3b3_embed = mx.symbol.Convolution(name='multiscale_res3b3_embed', data=multiscale_res3b_pool1, num_filter=2048,
                                                pad=(1, 1), kernel=(3, 3), stride=(1, 1))
-        multiscale_res3b3_embed_act = mx.symbol.Activation(name='multiscale_res3b3_embed_act',
-                                                           data=multiscale_res3b3_embed, act_type='relu')
         multiscale_res4b22_embed = mx.symbol.Convolution(name='multiscale_res4b22_embed', data=res4b22_relu, num_filter=2048,
                                                pad=(1, 1), kernel=(3, 3), stride=(1, 1))
-        multiscale_res4b22_embed_act = mx.symbol.Activation(name='multiscale_res4b22_embed_act',
-                                                            data=multiscale_res4b22_embed, act_type='relu')
-        multiscale_concat = mx.symbol.Concat(name='multiscale_concat', *[multiscale_res2c_embed_act, multiscale_res3b3_embed_act,
-                                                                         multiscale_res4b22_embed_act, res5c_relu], dim=0)
+        multiscale_concat = mx.symbol.Concat(name='multiscale_concat', *[multiscale_res3b3_embed,
+                                                                         multiscale_res4b22_embed, res5c_relu], dim=0)
         multiscale_ensemble = mx.symbol.sum(data=multiscale_concat, keepdims=True, axis=1, name='multiscale_ensemble')
         multiscale_transpose = mx.symbol.transpose(data = multiscale_ensemble, axes=(1,0,2,3), name='multiscale_transpose')
         multiscale_soft_act = mx.symbol.SoftmaxActivation(data = multiscale_transpose, mode='channel', name='multiscale_soft_act')
         multiscale_transpose_back = mx.symbol.transpose(data = multiscale_soft_act, axes=(1,0,2,3), name='multiscale_transpose_back')
-        split_weight = mx.symbol.split(multiscale_transpose_back, axis=0, num_outputs=4)
-        weight_tile_res2c = mx.sym.tile(split_weight[0], reps=(1, 2048, 1, 1))
-        weight_tile_res3b = mx.sym.tile(split_weight[1], reps=(1, 2048, 1, 1))
-        weight_tile_res4b = mx.sym.tile(split_weight[2], reps=(1, 2048, 1, 1))
-        weight_tile_res5c = mx.sym.tile(split_weight[3], reps=(1, 2048, 1, 1))
-        #a,b,c = weight_tile_res2c.infer_shape(data=(1,3,600,1000))
-        #print 'shape!!!!!!', b
-        multi_scale_combine = weight_tile_res2c * multiscale_res2c_embed_act + weight_tile_res3b * multiscale_res3b3_embed_act+\
-            weight_tile_res4b * multiscale_res4b22_embed_act + weight_tile_res5c * res5c_relu
+        split_weight = mx.symbol.split(multiscale_transpose_back, axis=0, num_outputs=3)
+        weight_tile_res3b = mx.sym.tile(split_weight[0], reps=(1, 2048, 1, 1))
+        weight_tile_res4b = mx.sym.tile(split_weight[1], reps=(1, 2048, 1, 1))
+        weight_tile_res5c = mx.sym.tile(split_weight[2], reps=(1, 2048, 1, 1))
+        multi_scale_combine = weight_tile_res3b * multiscale_res3b3_embed+\
+            weight_tile_res4b * multiscale_res4b22_embed + weight_tile_res5c * res5c_relu
         return multi_scale_combine
 
 
@@ -1491,6 +1475,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         res5c = mx.symbol.broadcast_add(name='res5c', *[res5b_relu, scale5c_branch2c])
         res5c_relu = mx.symbol.Activation(name='res5c_relu', data=res5c, act_type='relu')
         multiscale_feature = self.get_multiscale_attention(res2c_relu, res3b3_relu, res4b22_relu, res5c_relu)
+        multiscale_feature = multiscale_feature + res5c_relu
 
         feat_conv_3x3 = mx.sym.Convolution(
             data=multiscale_feature, kernel=(3, 3), pad=(6, 6), dilate=(6, 6), num_filter=1024, name="feat_conv_3x3")
@@ -1766,7 +1751,8 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         #feat_cache = mx.sym.Variable(name="feat_cache")
 
         # shared convolutional layers
-        conv_feat = self.get_resnet_v1(data)
+        #conv_feat = self.get_resnet_v1(data)
+        conv_feat = self.get_resnet_v1_multiscale(data)
         #embed_feat = self.get_embednet(conv_feat)
         #conv_embed = mx.sym.Concat(conv_feat, embed_feat, name="conv_embed")
 
@@ -1896,8 +1882,6 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         arg_params['feat_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['feat_conv_3x3_bias'])
 
 
-        arg_params['multiscale_res2c_embed_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['multiscale_res2c_embed_weight'])
-        arg_params['multiscale_res2c_embed_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['multiscale_res2c_embed_bias'])
         arg_params['multiscale_res3b3_embed_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['multiscale_res3b3_embed_weight'])
         arg_params['multiscale_res3b3_embed_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['multiscale_res3b3_embed_bias'])
         arg_params['multiscale_res4b22_embed_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['multiscale_res4b22_embed_weight'])
