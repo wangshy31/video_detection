@@ -1805,9 +1805,9 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             sum_mv_grid = mx.sym.GridGenerator(data=sum_mv, transform_type='warp')
             org_warp_conv_feat = mx.sym.BilinearSampler(data=conv_feat, grid=sum_mv_grid)
             cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
-            cell_conv_feat = cell_conv_feat + org_warp_conv_feat
-            hidden_conv_feat = hidden_conv_feat + org_warp_conv_feat
-            concat_cell_feat = mx.sym.Concat(concat_cell_feat, cell_conv_feat, dim=0)
+            #cell_conv_feat = cell_conv_feat + org_warp_conv_feat
+            #hidden_conv_feat = hidden_conv_feat + org_warp_conv_feat
+            concat_cell_feat = mx.sym.Concat(concat_cell_feat, cell_conv_feat+org_warp_conv_feat, dim=0)
 
         conv_feats = mx.sym.SliceChannel(concat_cell_feat, axis=1, num_outputs=2)
 
