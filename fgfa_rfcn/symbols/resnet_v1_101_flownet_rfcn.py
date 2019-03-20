@@ -1795,19 +1795,16 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         conv_feat = self.get_resnet_v1_multiscale(data)
         cell_conv_feat = conv_feat
         hidden_conv_feat = conv_feat
-        concat_cell_feat = conv_feat
-        org_warp_conv_feat = conv_feat
+        concat_feat = conv_feat
         for i in range(num_interval):
             flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
             warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
             warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
-            org_warp_conv_feat = mx.sym.BilinearSampler(data=org_warp_conv_feat, grid=flow_grid)
             cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
-            #cell_conv_feat = cell_conv_feat + org_warp_conv_feat
-            #hidden_conv_feat = hidden_conv_feat + org_warp_conv_feat
-            concat_cell_feat = mx.sym.Concat(concat_cell_feat, cell_conv_feat+org_warp_conv_feat, dim=0)
+            concat_feat = mx.sym.Concat(concat_feat, cell_conv_feat, dim=0)
 
-        conv_feats = mx.sym.SliceChannel(concat_cell_feat, axis=1, num_outputs=2)
+
+        conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
 
         # RPN layers
         rpn_feat = conv_feats[0]
