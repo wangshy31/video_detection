@@ -1772,6 +1772,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
 
         mv = mx.sym.Variable(name="mv")
+        mv = -mv
         mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
         residual = mx.sym.Variable(name="residual")
@@ -1795,16 +1796,24 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         conv_feat = self.get_resnet_v1_multiscale(data)
         cell_conv_feat = conv_feat
         hidden_conv_feat = conv_feat
-        concat_feat = conv_feat
+        concat_cell_feat = conv_feat
+        org_warp_conv_feat = conv_feat
         for i in range(num_interval):
             flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
             warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
             warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
+<<<<<<< HEAD
+            tmp_feat = mx.sym.BilinearSampler(data=org_warp_conv_feat, grid=flow_grid)
+            org_warp_conv_feat = tmp_feat
+=======
+            org_warp_conv_feat = mx.sym.BilinearSampler(data=org_warp_conv_feat, grid=flow_grid)
+>>>>>>> parent of b3a184a... no residual lstm
             cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
-            concat_feat = mx.sym.Concat(concat_feat, cell_conv_feat, dim=0)
+            #cell_conv_feat = cell_conv_feat + org_warp_conv_feat
+            #hidden_conv_feat = hidden_conv_feat + org_warp_conv_feat
+            concat_cell_feat = mx.sym.Concat(concat_cell_feat, cell_conv_feat+org_warp_conv_feat, dim=0)
 
-
-        conv_feats = mx.sym.SliceChannel(concat_feat, axis=1, num_outputs=2)
+        conv_feats = mx.sym.SliceChannel(concat_cell_feat, axis=1, num_outputs=2)
 
         # RPN layers
         rpn_feat = conv_feats[0]
@@ -1855,6 +1864,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         # shared convolutional layers
 
         mv = mx.sym.Variable(name="mv")
+        mv = -mv
         mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
         residual = mx.sym.Variable(name="residual")
@@ -1914,7 +1924,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             concat_bbox_pred = mx.symbol.Concat(concat_bbox_pred, bbox_pred, dim=0, name='concat_bbox_pred')
 
 
-        group = mx.sym.Group([data, concat_rois, concat_cls_prob, concat_bbox_pred, concat_feat, mv])
+        group = mx.sym.Group([data, concat_rois, concat_cls_prob, concat_bbox_pred])
         self.sym = group
 
         return group
