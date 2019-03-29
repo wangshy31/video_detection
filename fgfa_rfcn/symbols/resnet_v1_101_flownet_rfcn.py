@@ -1802,12 +1802,8 @@ class resnet_v1_101_flownet_rfcn(Symbol):
             flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
             warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
             warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
-<<<<<<< HEAD
             tmp_feat = mx.sym.BilinearSampler(data=org_warp_conv_feat, grid=flow_grid)
             org_warp_conv_feat = tmp_feat
-=======
-            org_warp_conv_feat = mx.sym.BilinearSampler(data=org_warp_conv_feat, grid=flow_grid)
->>>>>>> parent of b3a184a... no residual lstm
             cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
             #cell_conv_feat = cell_conv_feat + org_warp_conv_feat
             #hidden_conv_feat = hidden_conv_feat + org_warp_conv_feat
