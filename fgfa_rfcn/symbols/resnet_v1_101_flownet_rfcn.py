@@ -1775,14 +1775,11 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         mv = -mv
         mvs = mx.sym.SliceChannel(mv, axis=0, num_outputs=num_interval)
 
-        residual = mx.sym.Variable(name="residual")
-        residual_conv = mx.symbol.Convolution(name='video_residual_conv', data=residual,
-                                           num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
-                                           stride=(1, 1), no_bias=False)
-        #residual_conv1 = mx.sym.Convolution(
-            #data=residual, kernel=(3, 3), pad=(1, 1), num_filter=1024, name="video_residual_conv1")
-        #residual_relu = mx.symbol.Activation(name='residual_relu', data=residual_conv, act_type='relu')
-        residuals = mx.sym.SliceChannel(residual_conv, axis=0, num_outputs=num_interval)
+        #residual = mx.sym.Variable(name="residual")
+        #residual_conv = mx.symbol.Convolution(name='video_residual_conv', data=residual,
+                                           #num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
+                                           #stride=(1, 1), no_bias=False)
+        #residuals = mx.sym.SliceChannel(residual_conv, axis=0, num_outputs=num_interval)
 
         rpn_label_slice = mx.sym.SliceChannel(rpn_label, axis=0, num_outputs=num_interval+1)
         rpn_bbox_target_slice = mx.sym.SliceChannel(rpn_bbox_target, axis=0,
@@ -1792,22 +1789,15 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         gt_boxes_slice = mx.sym.SliceChannel(gt_boxes, axis=0,
                                                      num_outputs=num_interval+1)
         # pass through ResNet
-        #conv_feat = self.get_resnet_v1(data)
-        conv_feat = self.get_resnet_v1_multiscale(data)
+        conv_feat = self.get_resnet_v1(data)
+        #conv_feat = self.get_resnet_v1_multiscale(data)
         cell_conv_feat = conv_feat
-        hidden_conv_feat = conv_feat
         concat_cell_feat = conv_feat
-        org_warp_conv_feat = conv_feat
         for i in range(num_interval):
             flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
             warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
-            warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
-            tmp_feat = mx.sym.BilinearSampler(data=org_warp_conv_feat, grid=flow_grid)
-            org_warp_conv_feat = tmp_feat
-            cell_conv_feat, hidden_conv_feat = self.get_lstm_symbol(i, residuals[i], warp_conv_feat, warp_hidden_feat)
-            #cell_conv_feat = cell_conv_feat + org_warp_conv_feat
-            #hidden_conv_feat = hidden_conv_feat + org_warp_conv_feat
-            concat_cell_feat = mx.sym.Concat(concat_cell_feat, cell_conv_feat+org_warp_conv_feat, dim=0)
+            cell_conv_feat = warp_conv_feat
+            concat_cell_feat = mx.sym.Concat(concat_cell_feat, cell_conv_feat, dim=0)
 
         conv_feats = mx.sym.SliceChannel(concat_cell_feat, axis=1, num_outputs=2)
 
@@ -2123,6 +2113,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         return group
 
     def init_weight(self, cfg, arg_params, aux_params):
+        return
         for i in range(cfg.TRAIN.KEY_FRAME_INTERVAL):
             #arg_params['mem_i2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_i2h'+str(i)+'_weight'])
             #arg_params['mem_i2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_i2h'+str(i)+'_bias'])
