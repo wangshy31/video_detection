@@ -31,7 +31,7 @@ def get_rpn_testbatch(roidb, cur_frame, end_frame, cfg):
 
     data = [{'data': im_array[i],
              'mv': mv[i],
-             'residual': residual[i],
+             #'residual': residual[i],
              'im_info': im_info[i]} for i in range(len(roidb))]
     label = {}
 
