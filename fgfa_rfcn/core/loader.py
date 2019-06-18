@@ -191,7 +191,7 @@ class AnchorLoader(mx.io.DataIter):
 
         # decide data and label names
         if config.TRAIN.END2END:
-            self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'residual']
+            self.data_name = ['data','im_info', 'gt_boxes', 'data_cache', 'residual']
         else:
             self.data_name = ['data']
         self.label_name = ['label', 'bbox_target', 'bbox_weight']
@@ -270,13 +270,13 @@ class AnchorLoader(mx.io.DataIter):
         if max_label_shape is None:
             max_label_shape = []
 
-        if 'mv' not in max_data_shape:
-            h = max_data_shape[0][1][2]
-            w = max_data_shape[0][1][3]
-            for i in range(4):# num of pooling layers
-                h = math.floor(0.5*(h - 1)) +1
-                w = math.floor(0.5*(w - 1)) +1
-            max_data_shape.append(('mv', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 2, int(h), int(w))))
+        #if 'mv' not in max_data_shape:
+            #h = max_data_shape[0][1][2]
+            #w = max_data_shape[0][1][3]
+            #for i in range(4):# num of pooling layers
+                #h = math.floor(0.5*(h - 1)) +1
+                #w = math.floor(0.5*(w - 1)) +1
+            #max_data_shape.append(('mv', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 2, int(h), int(w))))
 
         if 'residual' not in max_data_shape:
             h = max_data_shape[0][1][2]
@@ -287,9 +287,13 @@ class AnchorLoader(mx.io.DataIter):
             max_data_shape.append(('residual', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
 
 
+        if 'data_cache' not in max_data_shape:
+            max_data_shape.append(('data_cache', (self.cfg.TRAIN.KEY_FRAME_INTERVAL+1, 3, max_data_shape[0][1][2], max_data_shape[0][1][3])))
+
         max_shapes = dict(max_data_shape + max_label_shape)
         input_batch_size = max_shapes['data'][0]
         im_info = [[max_shapes['data'][2], max_shapes['data'][3], 1.0]]
+        print max_shapes
         _, feat_shape, _ = self.feat_sym.infer_shape(**max_shapes)
         label = assign_anchor(feat_shape[0], np.zeros((0, 5)), im_info, self.cfg,
                               self.feat_stride, self.anchor_scales, self.anchor_ratios, self.allowed_border,

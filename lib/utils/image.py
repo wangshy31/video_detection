@@ -313,6 +313,39 @@ def read_train_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     res = res.reshape((num_interval, 3, h, w))
     return mv, res
 
+def read_train_res(prefix, im_shape, im_scale, num_interval, pos_target):
+    res_addr = prefix.replace('/VID/', '/RES/')+'.res'
+    h = im_shape[0]
+    w = im_shape[1]
+    for i in range(4):# num of pooling layers
+        h = math.floor(0.5*(h - 1)) +1
+        w = math.floor(0.5*(w - 1)) +1
+    h, w = int(h), int(w)
+    if pos_target == 0:
+        res = np.zeros((num_interval, 3, h, w), dtype=np.float16)
+        return res
+    res = np.fromfile(res_addr, dtype=np.float16)
+    assert res.shape[0]%(3*h*w)==0, 'res.shape[0]%(3*h*w)==0'
+    res = res[:num_interval*3*h*w]
+    res = res.reshape((num_interval, 3, h, w))
+    return res
+
+def read_train_datacache(video_name, target_size, max_size, pos_target, flipped, config):
+    data_cache = []
+    prefix = '/'.join(video_name[0:-1])
+    cur_index = int(video_name[-1].split('.')[0])
+    assert pos_target >= 0, "pos_target must be bigger than/equal to 0."
+    for idx in range(cur_index, cur_index+pos_target+1):
+        im = cv2.imread(prefix+'/'+str(idx).zfill(6)+'.JPEG', cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
+        im_tensor = transform(im, config.network.PIXEL_MEANS)
+        if flipped:
+            im_tensor = im_tensor[:, ::-1, :]
+        data_cache.append(im_tensor[0])
+    for idx in range(pos_target, config.TRAIN.KEY_FRAME_INTERVAL):
+        data_cache.append(data_cache[-1])
+    return np.array(data_cache)
+
 def read_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     mv_addr = prefix.replace('/VID/', '/MV/')+'.mv'
     res_addr = prefix.replace('/VID/', '/RES/')+'.res'
@@ -478,38 +511,31 @@ def get_seg_RGB_image(roidb, config):
 
         im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
         im_tensor = transform(im, config.network.PIXEL_MEANS)
-
         im_info = [im_tensor.shape[2], im_tensor.shape[3], im_scale]
-        #new_rec['boxes'] = roi_rec['boxes'].copy() * im_scale
-        #new_rec['im_info'] = im_info
-
         video_name = roi_rec['image'].split('/')
         prefix = '/'.join(video_name[0:5])+'/'+'-'.join(video_name[5:8])+'-'+str(int(video_name[-1].split('.')[0]))
-        print video_name, prefix
-        sys.exit()
         begin_pos = int(video_name[-1].split('.')[0])
         pos_target = min(num_interval, roi_rec['frame_seg_len']-begin_pos-1)
-        mv, residual = read_train_mv_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL, pos_target)
+        data_cache = read_train_datacache(video_name, target_size, max_size, pos_target, roidb[i]['flipped'], config)
+        residual = read_train_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL, pos_target)
 
         if roidb[i]['flipped']:
-            mv = mv[:, :, ::-1, :]
             residual = residual[:, :, ::-1, :]
         #read nearby roi_recs
         nearby_roidb = get_nearby_roi(roi_rec['image'], begin_pos, begin_pos+pos_target,
                                     roi_rec['frame_seg_len'], roi_rec['flipped'], im_info)
         for j in range(pos_target, num_interval):
             nearby_roidb.append(nearby_roidb[-1])
-        #print len(nearby_roidb), mv.shape, residual.shape
-        assert (len(nearby_roidb)-1) == mv.shape[0] == residual.shape[0], 'len(nearby_roidb) == mv.shape[0] == residual.shape[0]'
-
+        assert (len(nearby_roidb)-1) == residual.shape[0], 'len(nearby_roidb)-1 == residual.shape[0]'
+        assert (len(nearby_roidb)) == data_cache.shape[0], 'len(nearby_roidb) == data_cache.shape[0]'
 
         processed_ims.append(im_tensor)
+        processed_rgb.append(data_cache)
         #processed_roidb.append(new_rec)
-        processed_mv.append(mv)
         processed_residual.append(residual)
         processed_nearby_roidb.append(nearby_roidb)
 
-    return processed_ims, processed_mv, processed_residual, processed_nearby_roidb
+    return processed_ims, processed_rgb, processed_residual, processed_nearby_roidb
 
 def resize(im, target_size, max_size, stride=0, interpolation = cv2.INTER_LINEAR):
     """

@@ -1773,9 +1773,12 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         data_cache = mx.sym.Variable(name="data_cache")
         data_cache = data_cache / 255.0
         split_data = mx.symbol.split(data_cache, axis=0, num_outputs=num_interval+1)
-        concat_flow_data = mx.symbol.Concat(split_data[1:], split_data[:-1], dim=1)
-        flow = self.get_flownet(concat_flow_data)
-        split_flow = mx.symbol.split(concat_flow_data, axis=0, num_outputs=num_interval-1)
+        concat_flow_data = mx.symbol.Concat(split_data[1], split_data[0], dim=1)
+        for i in range(2, num_interval+1):
+            tmp_concat_flow_data = mx.symbol.Concat(split_data[i], split_data[i-1], dim=1)
+            concat_flow_data = mx.symbol.Concat(concat_flow_data, tmp_concat_flow_data, dim=0)
+        flow_output = self.get_flownet(concat_flow_data)
+        split_flow = mx.symbol.split(flow_output, axis=0, num_outputs=num_interval)
 
         #mv = mx.sym.Variable(name="mv")
         #mv = -mv
