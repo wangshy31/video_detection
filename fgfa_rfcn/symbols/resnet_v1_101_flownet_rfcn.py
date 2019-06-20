@@ -1878,6 +1878,15 @@ class resnet_v1_101_flownet_rfcn(Symbol):
                                            num_filter=1024*4, pad=(1, 1), kernel=(3, 3),
                                            stride=(1, 1), no_bias=False)
         residuals = mx.sym.SliceChannel(residual_conv, axis=0, num_outputs=num_interval)
+        data_cache = mx.sym.Variable(name="data_cache")
+        data_cache = data_cache / 255.0
+        split_data = mx.symbol.split(data_cache, axis=0, num_outputs=num_interval+1)
+        concat_flow_data = mx.symbol.Concat(split_data[1], split_data[0], dim=1)
+        for i in range(2, num_interval+1):
+            tmp_concat_flow_data = mx.symbol.Concat(split_data[i], split_data[i-1], dim=1)
+            concat_flow_data = mx.symbol.Concat(concat_flow_data, tmp_concat_flow_data, dim=0)
+        flow_output = self.get_flownet(concat_flow_data)
+        split_flow = mx.symbol.split(flow_output, axis=0, num_outputs=num_interval)
 
         # pass through ResNet
         #conv_feat = self.get_resnet_v1(data)
@@ -1887,7 +1896,7 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         concat_cell_feat = conv_feat
         org_warp_conv_feat = conv_feat
         for i in range(num_interval):
-            flow_grid = mx.sym.GridGenerator(data=mvs[i], transform_type='warp')
+            flow_grid = mx.sym.GridGenerator(data=split_flow[i], transform_type='warp')
             warp_conv_feat = mx.sym.BilinearSampler(data=cell_conv_feat, grid=flow_grid)
             warp_hidden_feat = mx.sym.BilinearSampler(data=hidden_conv_feat, grid=flow_grid)
             org_warp_conv_feat = mx.sym.BilinearSampler(data=org_warp_conv_feat, grid=flow_grid)

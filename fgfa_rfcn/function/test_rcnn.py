@@ -42,8 +42,8 @@ def get_predictor(sym, sym_instance, cfg, arg_params, aux_params, test_data, ctx
                        ('mv', (cfg.TRAIN.KEY_FRAME_INTERVAL, 2,
                                h, w)),
                        ('residual', (cfg.TRAIN.KEY_FRAME_INTERVAL, 3,
-                                     h,w))
-                       #('data_cache', (19, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
+                                     h,w)),
+                       ('data_cache', (cfg.TRAIN.KEY_FRAME_INTERVAL+1, 3,max([v[0] for v in cfg.SCALES]) ,max([v[1] for v in cfg.SCALES]) ))
                        ]]
 
     # create predictor

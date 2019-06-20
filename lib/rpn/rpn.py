@@ -13,7 +13,7 @@ label =
 import numpy as np
 import numpy.random as npr
 
-from utils.image import get_test_seg_image, get_seg_image, tensor_vstack, get_seg_RGB_image
+from utils.image import get_test_seg_image, get_seg_image, tensor_vstack, get_seg_RGB_image, get_test_seg_rgb_image
 from generate_anchor import generate_anchors
 from bbox.bbox_transform import bbox_overlaps, bbox_transform
 
@@ -25,13 +25,13 @@ def get_rpn_testbatch(roidb, cur_frame, end_frame, cfg):
     :return: data, label, im_info
     """
     # assert len(roidb) == 1, 'Single batch only'
-    imgs, mv, residual, roidb = get_test_seg_image(roidb, cur_frame, end_frame, cfg)
+    imgs, data_cache, residual, roidb = get_test_seg_rgb_image(roidb, cur_frame, end_frame, cfg)
     im_array = imgs
     im_info = [np.array([roidb[i][0]['im_info']], dtype=np.float32) for i in range(len(roidb))]
 
     data = [{'data': im_array[i],
-             'mv': mv[i],
              'residual': residual[i],
+             'data_cache': data_cache[i],
              'im_info': im_info[i]} for i in range(len(roidb))]
     label = {}
 
