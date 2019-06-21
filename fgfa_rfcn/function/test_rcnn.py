@@ -83,6 +83,7 @@ def test_rcnn(cfg, dataset, image_set, root_path, dataset_path, motion_iou_path,
 
     # load model
     arg_params, aux_params = load_param(prefix, epoch, process=True)
+    mem_sym_instance.init_rest_weight(cfg, arg_params, aux_params)
 
     # create predictor
     #feat_predictors = [get_predictor(feat_sym, feat_sym_instance, cfg, arg_params, aux_params, test_datas[i], [ctx[i]]) for i in range(gpu_num)]

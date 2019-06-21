@@ -2160,4 +2160,21 @@ class resnet_v1_101_flownet_rfcn(Symbol):
 
         arg_params['video_residual_conv_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['video_residual_conv_weight'])
         arg_params['video_residual_conv_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['video_residual_conv_bias'])
+    def init_rest_weight(self, cfg, arg_params, aux_params):
+        for i in range(7, cfg.TRAIN.KEY_FRAME_INTERVAL):
+            #arg_params['mem_i2h'+str(i)+'_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['mem_i2h'+str(i)+'_weight'])
+            #arg_params['mem_i2h'+str(i)+'_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['mem_i2h'+str(i)+'_bias'])
+            arg_params['mem_h2h'+str(i)+'_weight'] = arg_params['mem_h2h6_weight']
+            arg_params['mem_h2h'+str(i)+'_bias'] = arg_params['mem_h2h6_bias']
+
+            arg_params['concat_mem_i2h_bn_'+str(i)+'_gamma'] = arg_params['concat_mem_i2h_bn_6_gamma']
+            arg_params['concat_mem_i2h_bn_'+str(i)+'_beta'] = arg_params['concat_mem_i2h_bn_6_beta']
+            aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_mean'] = aux_params['concat_mem_i2h_bn_6_moving_mean']
+            aux_params['concat_mem_i2h_bn_'+str(i)+'_moving_var'] = aux_params['concat_mem_i2h_bn_6_moving_var']
+
+            arg_params['concat_mem_h2h_bn_'+str(i)+'_gamma'] = arg_params['concat_mem_h2h_bn_6_gamma']
+            arg_params['concat_mem_h2h_bn_'+str(i)+'_beta'] = arg_params['concat_mem_h2h_bn_6_beta']
+            aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_mean'] = aux_params['concat_mem_h2h_bn_6_moving_mean']
+            aux_params['concat_mem_h2h_bn_'+str(i)+'_moving_var'] = aux_params['concat_mem_h2h_bn_6_moving_var']
+
 
