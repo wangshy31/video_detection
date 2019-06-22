@@ -309,6 +309,34 @@ def read_train_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
     res = np.fromfile(res_addr, dtype=np.float16)
     assert mv.shape[0]%(2*h*w)==0, 'mv.shape[0]%(2*h*w)==0'
     assert res.shape[0]%(3*h*w)==0, 'res.shape[0]%(3*h*w)==0'
+    if mv.shape[0] > num_interval*2*h*w:
+        mv = mv[:num_interval*2*h*w]
+        res = res[:num_interval*3*h*w]
+    mv = mv.reshape((num_interval, 2, h, w))
+    res = res.reshape((num_interval, 3, h, w))
+    return mv, res
+def read_train_reverse_mv_res(prefix, im_shape, im_scale, num_interval, pos_target):
+    mv_addr = prefix.replace('/VID/', '/reverse/MV/')+'.mv'
+    res_addr = prefix.replace('/VID/', '/reverse/RES/')+'.res'
+    #h = math.ceil(im_shape[0]*im_scale) if (im_shape[0]*im_scale)>int((im_shape[0]*im_scale))+0.5 else math.floor(im_shape[0]*im_scale)
+    #w = math.ceil(im_shape[1]*im_scale) if (im_shape[1]*im_scale)>int((im_shape[1]*im_scale))+0.5 else math.floor(im_shape[1]*im_scale)
+    h = im_shape[0]
+    w = im_shape[1]
+    for i in range(4):# num of pooling layers
+        h = math.floor(0.5*(h - 1)) +1
+        w = math.floor(0.5*(w - 1)) +1
+    h, w = int(h), int(w)
+    if pos_target == 0:
+        mv = np.zeros((num_interval, 2, h, w), dtype=np.float16)
+        res = np.zeros((num_interval, 3, h, w), dtype=np.float16)
+        return mv, res
+    mv = np.fromfile(mv_addr, dtype=np.float16)
+    res = np.fromfile(res_addr, dtype=np.float16)
+    assert mv.shape[0]%(2*h*w)==0, 'mv.shape[0]%(2*h*w)==0'
+    assert res.shape[0]%(3*h*w)==0, 'res.shape[0]%(3*h*w)==0'
+    if mv.shape[0] > num_interval*2*h*w:
+        mv = mv[:num_interval*2*h*w]
+        res = res[:num_interval*3*h*w]
     mv = mv.reshape((num_interval, 2, h, w))
     res = res.reshape((num_interval, 3, h, w))
     return mv, res
@@ -447,6 +475,79 @@ def get_seg_image(roidb, config):
         processed_nearby_roidb.append(nearby_roidb)
 
     return processed_ims, processed_mv, processed_residual, processed_nearby_roidb
+
+def get_seg_reverse_image(roidb, config):
+    """
+    preprocess image and return processed roidb
+    :param roidb: a list of roidb
+    :return: list of img as in mxnet format
+    roidb add new item['im_info']
+    0 --- x (width, second dim of im)
+    |
+    y (height, first dim of im)
+    """
+    num_images = len(roidb)
+    processed_ims = []
+    processed_mv = []
+    processed_residual = []
+    processed_nearby_roidb = []
+    processed_reverse_ims = []
+    processed_reverse_mv = []
+    processed_reverse_residual = []
+    num_interval = config.TRAIN.KEY_FRAME_INTERVAL
+    #processed_roidb = []
+    for i in range(num_images):
+        roi_rec = roidb[i]
+        assert os.path.exists(roi_rec['image']), '%s does not exist'.format(roi_rec['image'])
+        im = cv2.imread(roi_rec['image'], cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        if roidb[i]['flipped']:
+            im = im[:, ::-1, :]
+
+        #new_rec = roi_rec.copy()
+        scale_ind = random.randrange(len(config.SCALES))
+        target_size = config.SCALES[scale_ind][0]
+        max_size = config.SCALES[scale_ind][1]
+
+        im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
+        im_tensor = transform(im, config.network.PIXEL_MEANS)
+
+        im_info = [im_tensor.shape[2], im_tensor.shape[3], im_scale]
+
+        video_name = roi_rec['image'].split('/')
+        prefix = '/'.join(video_name[0:5])+'/'+'-'.join(video_name[5:8])+'-'+str(int(video_name[-1].split('.')[0]))
+        begin_pos = int(video_name[-1].split('.')[0])
+        pos_target = min(num_interval, roi_rec['frame_seg_len']-begin_pos-1)
+        mv, residual = read_train_mv_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL, pos_target)
+        reverse_mv, reverse_residual = read_train_reverse_mv_res(prefix, im.shape, im_scale, config.TRAIN.KEY_FRAME_INTERVAL, pos_target)
+        reverse_im = cv2.imread('/'.join(video_name[:-1])+'/'+str(int(video_name[-1].split('.')[0])+pos_target).zfill(6)+'.JPEG',
+                                cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        if roidb[i]['flipped']:
+            reverse_im = reverse_im[:, ::-1, :]
+        reverse_im, reverse_im_scale = resize(reverse_im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
+        reverse_im_tensor = transform(reverse_im, config.network.PIXEL_MEANS)
+
+        if roidb[i]['flipped']:
+            mv = mv[:, :, ::-1, :]
+            residual = residual[:, :, ::-1, :]
+        #read nearby roi_recs
+        nearby_roidb = get_nearby_roi(roi_rec['image'], begin_pos, begin_pos+pos_target,
+                                    roi_rec['frame_seg_len'], roi_rec['flipped'], im_info)
+        for j in range(pos_target, num_interval):
+            nearby_roidb.append(nearby_roidb[-1])
+        #print len(nearby_roidb), mv.shape, residual.shape
+        assert (len(nearby_roidb)-1) == mv.shape[0] == residual.shape[0], 'len(nearby_roidb) == mv.shape[0] == residual.shape[0]'
+
+
+        processed_ims.append(im_tensor)
+        processed_reverse_ims.append(reverse_im_tensor)
+        #processed_roidb.append(new_rec)
+        processed_mv.append(mv)
+        processed_residual.append(residual)
+        processed_reverse_mv.append(reverse_mv)
+        processed_reverse_residual.append(reverse_residual)
+        processed_nearby_roidb.append(nearby_roidb)
+
+    return processed_ims, processed_mv, processed_residual, processed_nearby_roidb, processed_reverse_ims, processed_reverse_mv, processed_reverse_residual
 
 def resize(im, target_size, max_size, stride=0, interpolation = cv2.INTER_LINEAR):
     """

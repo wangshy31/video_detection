@@ -191,7 +191,8 @@ class AnchorLoader(mx.io.DataIter):
 
         # decide data and label names
         if config.TRAIN.END2END:
-            self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'residual']
+            self.data_name = ['data','im_info', 'gt_boxes', 'mv', 'residual',
+                              'reverse_data', 'reverse_mv', 'reverse_residual']
         else:
             self.data_name = ['data']
         self.label_name = ['label', 'bbox_target', 'bbox_weight']
@@ -285,6 +286,22 @@ class AnchorLoader(mx.io.DataIter):
                 h = math.floor(0.5*(h - 1)) +1
                 w = math.floor(0.5*(w - 1)) +1
             max_data_shape.append(('residual', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
+
+        if 'reverse_mv' not in max_data_shape:
+            h = max_data_shape[0][1][2]
+            w = max_data_shape[0][1][3]
+            for i in range(4):# num of pooling layers
+                h = math.floor(0.5*(h - 1)) +1
+                w = math.floor(0.5*(w - 1)) +1
+            max_data_shape.append(('reverse_mv', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 2, int(h), int(w))))
+
+        if 'reverse_residual' not in max_data_shape:
+            h = max_data_shape[0][1][2]
+            w = max_data_shape[0][1][3]
+            for i in range(4):# num of pooling layers
+                h = math.floor(0.5*(h - 1)) +1
+                w = math.floor(0.5*(w - 1)) +1
+            max_data_shape.append(('reverse_residual', (self.cfg.TRAIN.KEY_FRAME_INTERVAL, 3, int(h), int(w))))
 
 
         max_shapes = dict(max_data_shape + max_label_shape)

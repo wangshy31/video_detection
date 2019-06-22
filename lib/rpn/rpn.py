@@ -13,7 +13,7 @@ label =
 import numpy as np
 import numpy.random as npr
 
-from utils.image import get_test_seg_image, get_seg_image, tensor_vstack
+from utils.image import get_test_seg_image, get_seg_image, tensor_vstack, get_seg_reverse_image
 from generate_anchor import generate_anchors
 from bbox.bbox_transform import bbox_overlaps, bbox_transform
 
@@ -132,11 +132,15 @@ def get_rpn_seg_batch(roidb, cfg):
     :return: data, label
     """
     assert len(roidb) == 1, 'Single batch only'
-    imgs, mv, residual, nearby_roidb = get_seg_image(roidb, cfg)
+    #imgs, mv, residual, nearby_roidb = get_seg_image(roidb, cfg)
+    imgs, mv, residual, nearby_roidb, reverse_imgs, reverse_mv, reverse_residual = get_seg_reverse_image(roidb, cfg)
 
     im_array = imgs[0]
     mv_array = mv[0]
     residual_array = residual[0]
+    reverse_im_array = reverse_imgs[0]
+    reverse_mv_array = reverse_mv[0]
+    reverse_residual_array = reverse_residual[0]
     rois = nearby_roidb[0]
     #bef_im_array = bef_imgs[0]
     #aft_im_array = aft_imgs[0]
@@ -171,6 +175,9 @@ def get_rpn_seg_batch(roidb, cfg):
     data = {'data': im_array,
             'mv': mv_array,
             'residual': residual_array,
+            'reverse_data': reverse_im_array,
+            'reverse_mv': reverse_mv_array,
+            'reverse_residual': reverse_residual_array,
             'im_info': im_info}
     label = {'gt_boxes': np.array(nearby_gt_boxes)}
     return data, label

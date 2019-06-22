@@ -82,7 +82,8 @@ def train_net(args, ctx, pretrained, pretrained_flow, epoch, prefix, begin_epoch
                               bbox_std=config.network.ANCHOR_STDS)
 
     # infer max shape
-    max_data_shape = [('data', (config.TRAIN.BATCH_IMAGES, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES])))]
+    max_data_shape = [('data', (config.TRAIN.BATCH_IMAGES, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES]))),
+                      ('reverse_data', (config.TRAIN.BATCH_IMAGES, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES])))]
     max_data_shape, max_label_shape = train_data.infer_shape(max_data_shape)
     max_data_shape.append(('gt_boxes',
                            (config.TRAIN.BATCH_IMAGES*(1+config.TRAIN.KEY_FRAME_INTERVAL), 100, 5)))
